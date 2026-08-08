@@ -1,9 +1,10 @@
 /**
- * CodeMirror 6 エディタのセットアップ（M1: CM6 エディタ基盤）。
+ * CodeMirror 6 エディタのセットアップ。
  *
- * 基本セットアップ（編集可能・行番号・折り返し・履歴・Markdown 構文ハイライト）を
- * 最小構成で組み立てる。ライブプレビュー装飾（decoration）は M2 の責務であり、
- * ここでは装飾系の extension は追加しない。
+ * 基本セットアップ（編集可能・行番号・折り返し・履歴）に、ライブプレビュー装飾
+ * （markdownDecoration / markdownDecorationTheme）を組み込む。装飾は
+ * src/domain/markdown の構文解析 + 自前の StateField によるインライン装飾で
+ * 実現する（WYSIWYG の DOM 変換はしない。ソーステキストのまま編集できる）。
  *
  * 依存の向きの都合上、UI 層（src/ui）は infra を直接 import できない
  * （.oxlintrc.json で機械検査）。このモジュールは src/composition 経由で
@@ -11,17 +12,17 @@
  */
 
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { markdown } from '@codemirror/lang-markdown';
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
+
+import { markdownDecoration, markdownDecorationTheme } from '@/infra/editor/markdown-decoration';
 
 /** 生成したエディタの不透明なハンドル（UI 層は CM6 の型を知らない） */
 export interface EditorHandle {
   readonly destroy: () => void;
 }
 
-/** システム / アプリ設定のダークモード判定（CM6 のハイライト配色選択用） */
+/** システム / アプリ設定のダークモード判定（CM6 のテーマ配色選択用） */
 function isDarkMode(): boolean {
   if (typeof document === 'undefined') {
     return false;
@@ -86,8 +87,8 @@ export function buildEditorState(doc: string): EditorState {
     extensions: [
       history(),
       keymap.of([...defaultKeymap, ...historyKeymap]),
-      markdown(),
-      syntaxHighlighting(defaultHighlightStyle),
+      markdownDecoration,
+      markdownDecorationTheme,
       lineNumbers(),
       EditorView.lineWrapping,
       editorTheme(isDarkMode()),

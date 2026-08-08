@@ -99,6 +99,7 @@ const TREES = {
     { path: 'daily', type: 'tree' },
     { path: 'daily/2026-08-07.md', type: 'blob' },
     { path: 'daily/2026-08-08.md', type: 'blob' },
+    { path: 'decoration.md', type: 'blob' },
     { path: 'projects', type: 'tree' },
     { path: 'projects/tektite.md', type: 'blob' },
   ],
@@ -125,6 +126,11 @@ const NOTES = {
   'octocat/notes:projects/tektite.md': {
     sha: 'sha-tektite',
     content: '# tektite\n\nWeb で完結するマークダウンエディタ。\n',
+  },
+  'octocat/notes:decoration.md': {
+    sha: 'sha-decoration',
+    content:
+      '# 装飾サンプル\n\n**太字テキスト** と *斜体テキスト* と `コード`\n\n- 箇条書き\n1. 番号付きリスト\n\n> 引用文\n\n- [ ] 未完了タスク\n- [x] 完了タスク\n',
   },
 };
 

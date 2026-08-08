@@ -1,3 +1,4 @@
+import { EditorView } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
 
 import { buildEditorState } from '@/infra/editor/editor';
@@ -13,5 +14,11 @@ describe('CM6 エディタセットアップ（状態生成）', () => {
     const state = buildEditorState('hello');
     const next = state.update({ changes: { from: 0, insert: 'world ' } });
     expect(next.state.doc.toString()).toBe('world hello');
+  });
+
+  it('ライブプレビュー装飾（decorations facet）が組み込まれている', () => {
+    const state = buildEditorState('# 見出し\n\n- [ ] タスク');
+    // markdownDecoration の provide により decorations facet に 1 つ供給される
+    expect(state.facet(EditorView.decorations)).toHaveLength(1);
   });
 });
