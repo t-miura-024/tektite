@@ -11,4 +11,15 @@
  *
  * 上記の制約は .oxlintrc.json の overrides（no-restricted-imports）で機械的に検査される。
  */
-export {};
+
+export { isVaultCandidate, isValidGitHubName, vaultRefFullName } from './vault';
+export type { Vault, VaultCandidateEligibility, VaultRef } from './vault';
+export { ancestorDirectoryPaths, buildVaultTree, isExcludedPath } from './tree';
+export type {
+  TreeDirectory,
+  TreeEntry,
+  TreeEntryType,
+  TreeFile,
+  TreeNode,
+  VaultTree,
+} from './tree';

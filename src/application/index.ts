@@ -10,3 +10,5 @@
 
 export { SessionFetchError, SessionUseCases } from './session';
 export type { Session, SessionGateway, SessionUser } from './session';
+export { VaultFetchError, VaultUseCases } from './vault';
+export type { VaultFetchErrorKind, VaultGateway, VaultTreeData } from './vault';

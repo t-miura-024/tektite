@@ -219,3 +219,179 @@ body {
 .error-panel p {
   margin: 0;
 }
+
+/* アプリタイトル（ログイン済みヘッダー。ホームへのリンク） */
+.app-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Vault 選択画面 */
+.vault-picker-title {
+  margin-block: var(--space-md) 0;
+  font-size: clamp(1.125rem, 3vw, 1.5rem);
+}
+
+.vault-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr));
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vault-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+  color: var(--color-fg);
+  text-decoration: none;
+}
+
+.vault-link:hover {
+  border-color: var(--color-accent);
+}
+
+.vault-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.vault-badge {
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+}
+
+.vault-description {
+  color: var(--color-fg-muted);
+  font-size: 0.875rem;
+}
+
+/* Vault 内画面（サイドバー: ツリー / メイン: ノート）。狭い画面では縦積み */
+.vault-screen {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-md);
+  margin-block-start: var(--space-md);
+}
+
+@media (min-width: 48rem) {
+  .vault-screen {
+    grid-template-columns: minmax(16rem, 20rem) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .vault-sidebar {
+    border-right: 1px solid var(--color-border);
+    padding-right: var(--space-md);
+  }
+}
+
+.vault-sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.vault-back-link {
+  color: var(--color-fg-muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.vault-back-link:hover {
+  color: var(--color-accent);
+}
+
+.vault-title {
+  margin: 0;
+  font-size: 1.125rem;
+  word-break: break-all;
+}
+
+.vault-branch {
+  margin: var(--space-sm) 0;
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+}
+
+.tree-truncated-notice {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+}
+
+/* ファイルツリー */
+.file-tree,
+.file-tree-group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-tree-toggle,
+.file-tree-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  padding-inline-start: calc(var(--space-sm) + var(--tree-depth, 0) * var(--space-md));
+  border: none;
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.file-tree-toggle:hover,
+.file-tree-link:hover {
+  background-color: var(--color-bg-subtle);
+}
+
+.file-tree-link.is-selected {
+  background-color: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+
+.file-tree-caret {
+  flex: none;
+  color: var(--color-fg-muted);
+}
+
+.file-tree-link.is-selected .file-tree-caret {
+  color: inherit;
+}
+
+/* ノートペイン（表示実装は次計画。プレースホルダ） */
+.note-pane {
+  padding: var(--space-md);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.note-pane-label {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+}
+
+.note-pane-path {
+  margin: var(--space-xs) 0;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  word-break: break-all;
+}

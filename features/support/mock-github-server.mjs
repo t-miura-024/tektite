@@ -1,18 +1,22 @@
 /**
  * E2E 用の GitHub モックサーバー（playwright.config.ts の webServer が起動する）。
  *
- * Pages Functions がサーバー側で行う fetch（トークン交換・/user 取得）は
- * ブラウザ外のリクエストのため Playwright の route ハンドラでは捕捉できない。
- * そのため、Functions のテストシーム環境変数（GITHUB_TOKEN_URL / GITHUB_API_BASE_URL）
- * でこのモックに向け、OAuth フロー全体を実ブラウザで検証する。
+ * Pages Functions がサーバー側で行う fetch（トークン交換・/user 取得・
+ * リポジトリ一覧・ファイルツリー取得）はブラウザ外のリクエストのため
+ * Playwright の route ハンドラでは捕捉できない。そのため、Functions の
+ * テストシーム環境変数（GITHUB_TOKEN_URL / GITHUB_API_BASE_URL）でこの
+ * モックに向け、OAuth フロー全体と Vault 選択 → ツリー表示を実ブラウザで検証する。
  *
  * ブラウザが訪れる認可ページ（github.com/login/oauth/authorize）は常に本物の URL のまま、
  * Playwright の route ハンドラでモックする（features/steps/auth.steps.ts 参照）。
  *
  * エンドポイント:
- * - GET  /__health                    … webServer の起動確認用
- * - POST /login/oauth/access_token    … code=e2e-test-code ならテストトークンを返す
- * - GET  /user                        … テストトークンなら octocat を返す
+ * - GET  /__health                              … webServer の起動確認用
+ * - POST /login/oauth/access_token              … code=e2e-test-code ならテストトークンを返す
+ * - GET  /user                                  … テストトークンなら octocat を返す
+ * - GET  /user/repos                            … Vault 候補の検証用リポジトリ一覧（M3）
+ * - GET  /repos/:owner/:repo                    … リポジトリ情報（デフォルトブランチ解決）（M3）
+ * - GET  /repos/:owner/:repo/git/trees/:branch  … ファイルツリー（recursive 想定）（M3）
  */
 
 import { createServer } from 'node:http';
@@ -20,6 +24,88 @@ import { createServer } from 'node:http';
 const PORT = Number(process.env.MOCK_GITHUB_PORT ?? 4174);
 export const EXPECTED_CODE = 'e2e-test-code';
 export const EXPECTED_TOKEN = 'gho_e2e_test_token';
+
+/**
+ * リポジトリ一覧のモックデータ。Vault 候補フィルタ（write 権限あり・
+ * 非アーカイブ）の検証のため、除外対象（read-only / archived）も含める。
+ */
+const REPOS = [
+  {
+    id: 1,
+    name: 'notes',
+    full_name: 'octocat/notes',
+    private: false,
+    archived: false,
+    default_branch: 'main',
+    description: 'Daily notes',
+    pushed_at: '2026-08-07T12:00:00Z',
+    updated_at: '2026-08-07T12:00:00Z',
+    owner: { login: 'octocat' },
+    permissions: { admin: true, push: true, pull: true },
+  },
+  {
+    id: 2,
+    name: 'private-vault',
+    full_name: 'octocat/private-vault',
+    private: true,
+    archived: false,
+    default_branch: 'main',
+    description: null,
+    pushed_at: '2026-08-01T00:00:00Z',
+    updated_at: '2026-08-01T00:00:00Z',
+    owner: { login: 'octocat' },
+    permissions: { admin: true, push: true, pull: true },
+  },
+  {
+    id: 3,
+    name: 'read-only',
+    full_name: 'octocat/read-only',
+    private: false,
+    archived: false,
+    default_branch: 'main',
+    description: 'push 権限なし（Vault 候補から除外される）',
+    pushed_at: '2026-07-01T00:00:00Z',
+    updated_at: '2026-07-01T00:00:00Z',
+    owner: { login: 'octocat' },
+    permissions: { admin: false, push: false, pull: true },
+  },
+  {
+    id: 4,
+    name: 'archived-notes',
+    full_name: 'octocat/archived-notes',
+    private: false,
+    archived: true,
+    default_branch: 'main',
+    description: 'アーカイブ済み（Vault 候補から除外される）',
+    pushed_at: '2025-01-01T00:00:00Z',
+    updated_at: '2025-01-01T00:00:00Z',
+    owner: { login: 'octocat' },
+    permissions: { admin: true, push: true, pull: true },
+  },
+];
+
+const REPO_BY_FULL_NAME = new Map(REPOS.map((repo) => [repo.full_name, repo]));
+
+/** Git Trees API（recursive=1）想定のフラットエントリ。隠れディレクトリも含む */
+const TREES = {
+  'octocat/notes:main': [
+    { path: '.obsidian', type: 'tree' },
+    { path: '.obsidian/app.json', type: 'blob' },
+    { path: '.gitignore', type: 'blob' },
+    { path: 'README.md', type: 'blob' },
+    { path: 'attachments', type: 'tree' },
+    { path: 'attachments/logo.png', type: 'blob' },
+    { path: 'daily', type: 'tree' },
+    { path: 'daily/2026-08-07.md', type: 'blob' },
+    { path: 'daily/2026-08-08.md', type: 'blob' },
+    { path: 'projects', type: 'tree' },
+    { path: 'projects/tektite.md', type: 'blob' },
+  ],
+  'octocat/private-vault:main': [
+    { path: 'README.md', type: 'blob' },
+    { path: 'secrets.md', type: 'blob' },
+  ],
+};
 
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -34,6 +120,15 @@ function readBody(req) {
     });
     req.on('end', () => resolve(data));
   });
+}
+
+/** テストトークンを持たないリクエストは 401（GitHub の認証挙動を模倣） */
+function requireToken(req, res) {
+  if (req.headers.authorization === `Bearer ${EXPECTED_TOKEN}`) {
+    return true;
+  }
+  sendJson(res, 401, { message: 'Bad credentials' });
+  return false;
 }
 
 const server = createServer(async (req, res) => {
@@ -67,11 +162,48 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/user') {
-    if (req.headers.authorization === `Bearer ${EXPECTED_TOKEN}`) {
-      sendJson(res, 200, { login: 'octocat', id: 583231, name: 'The Octocat' });
-    } else {
-      sendJson(res, 401, { message: 'Bad credentials' });
+    if (!requireToken(req, res)) {
+      return;
     }
+    sendJson(res, 200, { login: 'octocat', id: 583231, name: 'The Octocat' });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/user/repos') {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const page = Number(url.searchParams.get('page') ?? '1');
+    sendJson(res, 200, page <= 1 ? REPOS : []);
+    return;
+  }
+
+  const treeMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/trees\/([^/]+)$/);
+  if (req.method === 'GET' && treeMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const key = `${treeMatch[1]}/${treeMatch[2]}:${decodeURIComponent(treeMatch[3] ?? '')}`;
+    const tree = TREES[key];
+    if (!tree) {
+      sendJson(res, 404, { message: 'Not Found' });
+      return;
+    }
+    sendJson(res, 200, { sha: 'mock-tree-sha', truncated: false, tree });
+    return;
+  }
+
+  const repoMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)$/);
+  if (req.method === 'GET' && repoMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const repo = REPO_BY_FULL_NAME.get(`${repoMatch[1]}/${repoMatch[2]}`);
+    if (!repo) {
+      sendJson(res, 404, { message: 'Not Found' });
+      return;
+    }
+    sendJson(res, 200, repo);
     return;
   }
 
