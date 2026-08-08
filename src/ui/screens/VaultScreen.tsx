@@ -11,11 +11,11 @@
  * ユースケースの実行は組成ルート（src/composition）の run() 経由で行う。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { openVault } from '@/application/vault';
 import { run } from '@/composition';
-import type { VaultTree } from '@/domain/tree';
+import type { TreeDirectory, VaultTree } from '@/domain/tree';
 import { ancestorDirectoryPaths } from '@/domain/tree';
 import type { VaultRef } from '@/domain/vault';
 import { vaultRefFullName } from '@/domain/vault';
@@ -25,6 +25,22 @@ import { Link } from '@/ui/components/Link';
 import { NotePane } from '@/ui/components/NotePane';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError, vaultErrorMessage } from '@/ui/vault-error';
+
+/** ツリーから全ファイルパスを収集する（リーディング表示のリンク解決用） */
+function collectFilePaths(root: TreeDirectory): string[] {
+  const paths: string[] = [];
+  const walk = (directory: TreeDirectory): void => {
+    for (const child of directory.children) {
+      if (child.type === 'file') {
+        paths.push(child.path);
+      } else {
+        walk(child);
+      }
+    }
+  };
+  walk(root);
+  return paths;
+}
 
 export interface VaultScreenProps {
   vaultRef: VaultRef;
@@ -103,6 +119,12 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     });
   }, []);
 
+  // ツリーが取得できている間だけ全ファイルパスを算出する（リーディング表示用）
+  const filePaths = useMemo(
+    () => (state.kind === 'ready' ? collectFilePaths(state.tree.root) : []),
+    [state],
+  );
+
   return (
     <div className="vault-screen">
       <aside className="vault-sidebar">
@@ -148,6 +170,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           <NotePane
             vaultRef={vaultRef}
             notePath={notePath}
+            filePaths={filePaths}
             notify={notify}
             onSessionExpired={onSessionExpired}
           />

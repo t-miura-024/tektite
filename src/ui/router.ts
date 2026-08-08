@@ -89,9 +89,14 @@ export function noteRoutePath(ref: VaultRef, notePath: string): string {
   return `${vaultRoutePath(ref)}/blob/${encodedPath}`;
 }
 
-/** SPA 内遷移（pushState + 通知）。同じパスなら何もしない */
+/**
+ * SPA 内遷移（pushState + 通知）。同じパスなら何もしない。
+ * パスは同じでハッシュ（見出しアンカー）だけ変わる遷移は pushState する
+ * （`[[ノート#見出し]]` で同一ノート内の見出しへ移動するため）。
+ */
 export function navigate(to: string): void {
-  if (window.location.pathname === to) {
+  const current = `${window.location.pathname}${window.location.hash}`;
+  if (current === to) {
     return;
   }
   window.history.pushState(null, '', to);

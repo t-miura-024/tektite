@@ -53,18 +53,19 @@ export async function authenticateRequest(
   return { ok: true, token };
 }
 
-/** GitHub API への fetch（ヘッダー規約を統一する） */
+/** GitHub API への fetch（ヘッダー規約を統一する。raw 配信は headers で上書き可能） */
 export async function githubApiFetch(
   baseUrl: string,
   path: string,
   token: string,
-  init: { method?: string; body?: string } = {},
+  init: { method?: string; body?: string; headers?: Record<string, string> } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
     'User-Agent': 'tektite',
     'X-GitHub-Api-Version': '2022-11-28',
+    ...init.headers,
   };
   if (init.body !== undefined) {
     headers['Content-Type'] = 'application/json';

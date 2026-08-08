@@ -30,6 +30,7 @@ import type { VaultRef } from '@/domain/vault';
 
 import { ConflictPanel } from '@/ui/components/ConflictPanel';
 import { NoteEditor } from '@/ui/components/NoteEditor';
+import { ReadingView } from '@/ui/components/ReadingView';
 import { noteErrorMessage, noteSaveErrorMessage } from '@/ui/note-error';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError } from '@/ui/vault-error';
@@ -38,6 +39,8 @@ export interface NotePaneProps {
   vaultRef: VaultRef;
   /** 表示・編集対象のノートパス（Vault ルートからの / 区切り） */
   notePath: string;
+  /** Vault 内の全ファイルパス（リーディング表示の WikiLink / Embed 解決用） */
+  filePaths: readonly string[];
   notify: (message: string, action?: ToastAction) => void;
   onSessionExpired: () => void;
 }
@@ -46,6 +49,9 @@ type LoadState =
   | { kind: 'loading' }
   | { kind: 'ready'; note: NoteContent }
   | { kind: 'error'; message: string };
+
+/** ペインの表示モード（Obsidian のパネル設定に倣いノート切替をまたいで保持する） */
+type PaneMode = 'edit' | 'read';
 
 /** 保存状態（表示用。conflict は別状態として持つ） */
 type SaveStatus = 'clean' | 'dirty' | 'saving';
@@ -58,13 +64,21 @@ interface ConflictState {
   remote: NoteContent;
 }
 
-export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NotePaneProps) {
+export function NotePane({
+  vaultRef,
+  notePath,
+  filePaths,
+  notify,
+  onSessionExpired,
+}: NotePaneProps) {
   const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading' });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('clean');
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [draftNotice, setDraftNotice] = useState<Draft | null>(null);
   /** エディタの初期内容（競合解決・ノート切替で差し替える） */
   const [editorContent, setEditorContent] = useState<string>('');
+  /** 表示/編集モード（Obsidian に倣いパネル単位で保持し、ノート切替では変えない） */
+  const [mode, setMode] = useState<PaneMode>('edit');
 
   // イベントコールバックから最新値を読むための ref（レンダーを跨いで安定させる）
   const handleRef = useRef<EditorHandle | null>(null);
@@ -377,6 +391,28 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
         <p className="note-pane-path" data-testid="note-path">
           {notePath}
         </p>
+        <div className="note-mode-toggle" role="group" aria-label="ノートの表示モード">
+          <button
+            type="button"
+            className={mode === 'read' ? 'is-active' : ''}
+            data-testid="mode-read-button"
+            aria-pressed={mode === 'read'}
+            onClick={() => setMode('read')}
+            disabled={loadState.kind !== 'ready' || conflict !== null}
+          >
+            表示
+          </button>
+          <button
+            type="button"
+            className={mode === 'edit' ? 'is-active' : ''}
+            data-testid="mode-edit-button"
+            aria-pressed={mode === 'edit'}
+            onClick={() => setMode('edit')}
+            disabled={loadState.kind !== 'ready' || conflict !== null}
+          >
+            編集
+          </button>
+        </div>
         <span className="save-status" data-testid="save-status" data-status={statusKey}>
           {statusLabel}
         </span>
@@ -427,14 +463,30 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
         </div>
       )}
       {loadState.kind === 'ready' && conflict === null && (
-        <NoteEditor
-          key={notePath}
-          notePath={notePath}
-          initialContent={editorContent}
-          onContentChange={handleContentChange}
-          onBlur={handleEditorBlur}
-          onReady={handleEditorReady}
-        />
+        <div className="note-pane-body" data-mode={mode}>
+          {/* エディタはモード切替でアンマウントせず非表示に保つ（編集中の内容と
+              未保存状態を維持するため。表示モードへの切替時に blur が走り、
+              既存ルールどおり自動保存される） */}
+          <NoteEditor
+            key={notePath}
+            notePath={notePath}
+            initialContent={editorContent}
+            onContentChange={handleContentChange}
+            onBlur={handleEditorBlur}
+            onReady={handleEditorReady}
+          />
+          {mode === 'read' && (
+            <ReadingView
+              key={notePath}
+              vaultRef={vaultRef}
+              notePath={notePath}
+              content={contentRef.current}
+              filePaths={filePaths}
+              notify={notify}
+              onSessionExpired={onSessionExpired}
+            />
+          )}
+        </div>
       )}
       {conflict !== null && (
         <ConflictPanel
