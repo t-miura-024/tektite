@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { base64UrlDecode, base64UrlEncode } from './base64url';
+import { base64UrlDecode, base64UrlEncode } from '@/infra/auth/base64url';
 
 describe('base64UrlEncode / base64UrlDecode', () => {
   it('バイト列を base64url にエンコードしてデコードすると元に戻る', () => {

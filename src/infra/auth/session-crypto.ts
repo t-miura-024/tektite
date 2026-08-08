@@ -13,7 +13,7 @@
  * （Workers ランタイム・ブラウザ・Vitest(node) のいずれでも動作する）。
  */
 
-import { base64UrlDecode, base64UrlEncode } from './base64url';
+import { base64UrlDecode, base64UrlEncode } from '@/infra/auth/base64url';
 
 const PAYLOAD_VERSION = 'v1';
 const IV_BYTES = 12;

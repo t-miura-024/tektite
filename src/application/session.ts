@@ -4,7 +4,14 @@
  * ログイン状態の確認とログアウトを進行させる。セッションの実体は
  * 暗号化 Cookie（ADR-0002）であり、この層はポート（SessionGateway）経由で
  * だけ永続化に触れる。実装は src/infra/auth（Pages Functions プロキシ呼び出し）。
+ *
+ * 依存性逆転の仕組みとして Effect の Service（Tag）を採用する:
+ * ポートはこの層で Effect Service として定義し、具体実装（Layer）は src/infra が、
+ * 組成（Layer の組み立てと実行）は src/composition が担う。UI 層は infra を
+ * import しない（.oxlintrc.json で機械的に検査される）。
  */
+
+import { Context, Effect } from 'effect';
 
 /** ログイン中の GitHub ユーザー */
 export interface SessionUser {
@@ -25,28 +32,26 @@ export class SessionFetchError extends Error {
 }
 
 /**
- * ポート: セッションの照会と破棄。
- * src/infra/auth の HttpSessionGateway が Pages Functions 経由で実装する。
+ * ポート: セッションの照会と破棄（Effect Service）。
+ * src/infra/auth の SessionGatewayLive（Pages Functions 経由）が実装する。
  */
 export interface SessionGateway {
-  getCurrentSession(): Promise<Session>;
-  logout(): Promise<void>;
+  readonly getCurrentSession: () => Effect.Effect<Session, SessionFetchError>;
+  readonly logout: () => Effect.Effect<void, SessionFetchError>;
 }
+export const SessionGateway = Context.GenericTag<SessionGateway>('tektite/SessionGateway');
 
-/**
- * セッション系ユースケースをまとめる。
- * UI 層はこれを通じてのみセッション状態を操作する。
- */
-export class SessionUseCases {
-  constructor(private readonly gateway: SessionGateway) {}
+/** 現在のセッション状態を確認する（未ログインは anonymous、障害は SessionFetchError） */
+export const getCurrentSession: Effect.Effect<Session, SessionFetchError, SessionGateway> =
+  Effect.gen(function* () {
+    const gateway = yield* SessionGateway;
+    return yield* gateway.getCurrentSession();
+  });
 
-  /** 現在のセッション状態を確認する（未ログインは anonymous、障害は SessionFetchError） */
-  getCurrentSession(): Promise<Session> {
-    return this.gateway.getCurrentSession();
-  }
-
-  /** ログアウトし、セッション Cookie を破棄する */
-  async logout(): Promise<void> {
-    await this.gateway.logout();
-  }
-}
+/** ログアウトし、セッション Cookie を破棄する */
+export const logout: Effect.Effect<void, SessionFetchError, SessionGateway> = Effect.gen(
+  function* () {
+    const gateway = yield* SessionGateway;
+    return yield* gateway.logout();
+  },
+);

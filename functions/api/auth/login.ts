@@ -3,13 +3,24 @@
  *
  * CSRF 対策の state を署名付き Cookie に保存し、GitHub の認可ページへ
  * 302 リダイレクトする（OAuth App フロー、scope=repo）。
+ *
+ * `?return_to=<path>` が指定された場合は、ログイン後の戻り先を署名付き
+ * Cookie に保存する（ディープリンク復帰。コールバックで検証してリダイレクト）。
  */
 
-import { generateOAuthState } from '../../../src/infra/auth/oauth-state';
-import { AuthConfigError, GITHUB_AUTHORIZE_URL, resolveAuthConfig } from './_lib/env';
-import { createStateCookie } from './_lib/session';
+import { generateOAuthState } from '@/infra/auth/oauth-state';
+import {
+  AuthConfigError,
+  GITHUB_AUTHORIZE_URL,
+  resolveAuthConfig,
+} from '@functions/api/auth/_lib/env';
+import {
+  createStateCookie,
+  createReturnToCookie,
+  isSafeReturnTo,
+} from '@functions/api/auth/_lib/session';
 
-export const onRequestGet: PagesFunction<Env, 'api/auth/login'> = async ({ env }) => {
+export const onRequestGet: PagesFunction<Env, 'api/auth/login'> = async ({ env, request }) => {
   let config;
   try {
     config = resolveAuthConfig(env);
@@ -33,6 +44,13 @@ export const onRequestGet: PagesFunction<Env, 'api/auth/login'> = async ({ env }
   const headers = new Headers();
   headers.set('Location', authorizeUrl.toString());
   headers.append('Set-Cookie', await createStateCookie(config.sessionSecret, state));
+
+  // ディープリンクからのログイン: 安全な同一オリジンパスのみ return-to として保持する
+  const returnTo = new URL(request.url).searchParams.get('return_to');
+  if (returnTo !== null && isSafeReturnTo(returnTo)) {
+    headers.append('Set-Cookie', await createReturnToCookie(config.sessionSecret, returnTo));
+  }
+
   headers.set('Cache-Control', 'no-store');
   return new Response(null, { status: 302, headers });
 };

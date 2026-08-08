@@ -12,8 +12,8 @@ import type { CSSProperties } from 'react';
 import type { TreeDirectory, TreeNode } from '@/domain/tree';
 import type { VaultRef } from '@/domain/vault';
 
-import { noteRoutePath } from '../router';
-import { Link } from './Link';
+import { noteRoutePath } from '@/ui/router';
+import { Link } from '@/ui/components/Link';
 
 export interface FileTreeProps {
   root: TreeDirectory;

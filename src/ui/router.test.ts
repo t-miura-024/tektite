@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { noteRoutePath, parseRoute, vaultRoutePath } from './router';
+import { noteRoutePath, parseRoute, vaultRoutePath } from '@/ui/router';
 
 describe('parseRoute', () => {
   it('ルートは Vault 選択画面', () => {

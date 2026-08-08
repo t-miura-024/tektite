@@ -3,7 +3,7 @@
  * Vault 一覧（ルート）への導線だけを置く。
  */
 
-import { Link } from '../components/Link';
+import { Link } from '@/ui/components/Link';
 
 export function NotFoundScreen() {
   return (

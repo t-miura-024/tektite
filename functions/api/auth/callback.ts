@@ -4,11 +4,18 @@
  * 1. state の検証（署名付き Cookie との突き合わせ、CSRF 対策）
  * 2. authorization code をアクセストークンに交換（server-side のみ）
  * 3. トークンを AES-GCM 暗号化して HttpOnly Cookie に格納（ADR-0002）
- * 4. SPA ルートへリダイレクト（失敗時は ?error=<code> を付与）
+ * 4. ログイン前の return-to（署名付き Cookie、既定は SPA ルート）へリダイレクト
+ *    （失敗時は ?error=<code> を付与して SPA ルートへ）
  */
 
-import { AuthConfigError, resolveAuthConfig } from './_lib/env';
-import { clearStateCookie, createSessionCookie, verifyStateCookie } from './_lib/session';
+import { AuthConfigError, resolveAuthConfig } from '@functions/api/auth/_lib/env';
+import {
+  clearReturnToCookie,
+  clearStateCookie,
+  createSessionCookie,
+  verifyReturnToCookie,
+  verifyStateCookie,
+} from '@functions/api/auth/_lib/session';
 
 interface TokenResponseBody {
   access_token?: string;
@@ -18,11 +25,12 @@ interface TokenResponseBody {
   error_description?: string;
 }
 
-/** エラーコードを付与して SPA ルートへ戻す（state Cookie も破棄する） */
+/** エラーコードを付与して SPA ルートへ戻す（state / return-to Cookie も破棄する） */
 function redirectToApp(errorCode: string): Response {
   const headers = new Headers();
   headers.set('Location', `/?error=${errorCode}`);
   headers.append('Set-Cookie', clearStateCookie());
+  headers.append('Set-Cookie', clearReturnToCookie());
   headers.set('Cache-Control', 'no-store');
   return new Response(null, { status: 302, headers });
 }
@@ -89,12 +97,14 @@ export const onRequestGet: PagesFunction<Env, 'api/auth/callback'> = async ({ en
   }
 
   const headers = new Headers();
-  headers.set('Location', '/');
+  // ディープリンク復帰: 署名検証済みの return-to（未指定・不正時は "/"）へ戻す
+  headers.set('Location', await verifyReturnToCookie(request, config.sessionSecret));
   headers.append(
     'Set-Cookie',
     await createSessionCookie(config.sessionSecret, tokenBody.access_token),
   );
   headers.append('Set-Cookie', clearStateCookie());
+  headers.append('Set-Cookie', clearReturnToCookie());
   headers.set('Cache-Control', 'no-store');
   return new Response(null, { status: 302, headers });
 };

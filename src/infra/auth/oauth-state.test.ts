@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { generateOAuthState, signOAuthState, verifyOAuthState } from './oauth-state';
+import { generateOAuthState, signOAuthState, verifyOAuthState } from '@/infra/auth/oauth-state';
 
 const SECRET = 'test-session-secret';
 

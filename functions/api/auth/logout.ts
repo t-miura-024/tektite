@@ -5,7 +5,7 @@
  * サーバー側に破棄するセッション記録は存在しない。
  */
 
-import { clearSessionCookie } from './_lib/session';
+import { clearSessionCookie } from '@functions/api/auth/_lib/session';
 
 export const onRequestPost: PagesFunction<Env, 'api/auth/logout'> = () => {
   const headers = new Headers();

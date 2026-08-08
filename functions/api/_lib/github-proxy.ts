@@ -11,7 +11,7 @@
  * E2E ではローカルのモック GitHub サーバーに差し替えられる。
  */
 
-import { clearSessionCookie, readAccessToken } from '../auth/_lib/session';
+import { clearSessionCookie, readAccessToken } from '@functions/api/auth/_lib/session';
 
 const DEFAULT_GITHUB_API_BASE_URL = 'https://api.github.com';
 

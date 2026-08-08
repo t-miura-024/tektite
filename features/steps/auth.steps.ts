@@ -26,7 +26,8 @@ const MOCK_AUTH_CODE = 'e2e-test-code';
 Given('GitHub OAuth のモックが有効である', async ({ page }) => {
   // /api/auth/login の 302 を書き換え、GitHub 認可ページへの遷移を
   // 「認可承認 → コールバックへ code + state を持って戻る」に置き換える。
-  await page.route('**/api/auth/login', async (route) => {
+  // （末尾 ** は return_to 等のクエリ付きリクエストにもマッチさせるため）
+  await page.route('**/api/auth/login**', async (route) => {
     const response = await route.fetch({ maxRedirects: 0 });
     const location = response.headers()['location'];
     if (response.status() !== 302 || !location) {
@@ -57,6 +58,14 @@ Given('GitHub OAuth のモックが有効である', async ({ page }) => {
 
 Given('ユーザーはログイン画面にいる', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByRole('link', { name: LOGIN_BUTTON })).toBeVisible();
+});
+
+When('ユーザーが未ログインでディープリンク {string} を開く', async ({ page }, path: string) => {
+  await page.goto(path);
+});
+
+Then('ログイン画面が表示される', async ({ page }) => {
   await expect(page.getByRole('link', { name: LOGIN_BUTTON })).toBeVisible();
 });
 

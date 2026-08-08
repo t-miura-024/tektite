@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decryptSecretPayload, encryptSecretPayload } from './session-crypto';
+import { decryptSecretPayload, encryptSecretPayload } from '@/infra/auth/session-crypto';
 
 const SECRET = 'test-session-secret';
 

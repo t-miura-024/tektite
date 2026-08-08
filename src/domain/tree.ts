@@ -7,7 +7,7 @@
  * 隠れ「ファイル」は表示対象に残る。
  */
 
-import type { VaultRef } from './vault';
+import type { VaultRef } from '@/domain/vault';
 
 export type TreeEntryType = 'file' | 'directory';
 

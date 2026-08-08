@@ -8,7 +8,7 @@
  * WebCrypto（crypto.subtle）のみを使用し、Node API には依存しない。
  */
 
-import { base64UrlDecode, base64UrlEncode } from './base64url';
+import { base64UrlDecode, base64UrlEncode } from '@/infra/auth/base64url';
 
 const STATE_BYTES = 32;
 

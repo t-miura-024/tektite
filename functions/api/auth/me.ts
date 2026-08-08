@@ -10,8 +10,8 @@
  * - 正常                                 → 200 { authenticated: true, login }
  */
 
-import { AuthConfigError, resolveAuthConfig } from './_lib/env';
-import { clearSessionCookie, readAccessToken } from './_lib/session';
+import { AuthConfigError, resolveAuthConfig } from '@functions/api/auth/_lib/env';
+import { clearSessionCookie, readAccessToken } from '@functions/api/auth/_lib/session';
 
 interface GitHubUserResponseBody {
   login?: string;

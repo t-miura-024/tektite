@@ -5,7 +5,7 @@
 
 import type { AnchorHTMLAttributes } from 'react';
 
-import { navigate } from '../router';
+import { navigate } from '@/ui/router';
 
 export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> {
   to: string;

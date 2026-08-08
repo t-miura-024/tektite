@@ -15,7 +15,7 @@
  * - 正常                           → 200 { vaults: [...] }
  */
 
-import { isVaultCandidate } from '../../../src/domain/vault';
+import { isVaultCandidate } from '@/domain/vault';
 import {
   ProxyConfigError,
   authenticateRequest,
@@ -23,7 +23,7 @@ import {
   githubUnreachable,
   mapGithubFailure,
   resolveProxyConfig,
-} from '../_lib/github-proxy';
+} from '@functions/api/_lib/github-proxy';
 
 interface GithubRepoPermissions {
   admin?: boolean;

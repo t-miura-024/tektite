@@ -17,7 +17,7 @@
  * が担当する。サブモジュール（type: 'commit'）は対象外のため含めない。
  */
 
-import { isValidGitHubName } from '../../../../src/domain/vault';
+import { isValidGitHubName } from '@/domain/vault';
 import {
   ProxyConfigError,
   authenticateRequest,
@@ -25,7 +25,7 @@ import {
   githubUnreachable,
   mapGithubFailure,
   resolveProxyConfig,
-} from '../../_lib/github-proxy';
+} from '@functions/api/_lib/github-proxy';
 
 interface GithubRepoInfo {
   default_branch?: unknown;

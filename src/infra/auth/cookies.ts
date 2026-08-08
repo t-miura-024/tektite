@@ -19,6 +19,8 @@ export interface CookieOptions {
 
 /**
  * Cookie ヘッダー文字列をパースする。重複時は後の値を優先する。
+ * 不正なパーセントエスケープを含む Cookie は無視する（URIError で認証
+ * エンドポイントが 500 になるのを防ぐため、該当 Cookie だけ null 扱いにする）。
  */
 export function parseCookies(header: string | null | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
@@ -35,7 +37,13 @@ export function parseCookies(header: string | null | undefined): Record<string, 
     if (name.length === 0) {
       continue;
     }
-    cookies[name] = decodeURIComponent(value);
+    try {
+      cookies[name] = decodeURIComponent(value);
+    } catch {
+      // 不正なパーセントエスケープ（例: "%ZZ"、途中切れの UTF-8 列）は
+      // その Cookie を存在しなかったものとして扱う
+      continue;
+    }
   }
   return cookies;
 }

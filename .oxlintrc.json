@@ -13,7 +13,12 @@
   "rules": {
     "react/react-in-jsx-scope": "off",
     "unicorn/require-module-specifiers": "off",
-    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }]
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css"]
+      }
+    ]
   },
   "overrides": [
     {
@@ -30,6 +35,17 @@
               "@cloudflare/*",
               "wrangler"
             ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/ui/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": ["@/infra", "**/infra/**"]
           }
         ]
       }

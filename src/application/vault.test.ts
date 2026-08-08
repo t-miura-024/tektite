@@ -1,8 +1,8 @@
+import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { VaultTreeData } from './vault';
-import { VaultFetchError, VaultUseCases } from './vault';
-import type { VaultGateway } from './vault';
+import { VaultFetchError, VaultGateway, listVaults, openVault } from '@/application/vault';
+import type { VaultTreeData } from '@/application/vault';
 import type { Vault, VaultRef } from '@/domain/vault';
 
 const REF: VaultRef = { owner: 'octocat', name: 'notes' };
@@ -21,16 +21,24 @@ const VAULTS: readonly Vault[] = [
 
 function createGatewayStub(treeData: VaultTreeData): VaultGateway {
   return {
-    listVaults: vi.fn<() => Promise<readonly Vault[]>>().mockResolvedValue(VAULTS),
-    fetchTree: vi.fn<(ref: VaultRef) => Promise<VaultTreeData>>().mockResolvedValue(treeData),
+    listVaults: vi
+      .fn<() => Effect.Effect<readonly Vault[], VaultFetchError>>()
+      .mockReturnValue(Effect.succeed(VAULTS)),
+    fetchTree: vi
+      .fn<(ref: VaultRef) => Effect.Effect<VaultTreeData, VaultFetchError>>()
+      .mockReturnValue(Effect.succeed(treeData)),
   };
 }
 
-describe('VaultUseCases', () => {
+function provideStub(gateway: VaultGateway) {
+  return Layer.succeed(VaultGateway, gateway);
+}
+
+describe('vault ユースケース', () => {
   it('listVaults はゲートウェイの一覧を返す', async () => {
     const gateway = createGatewayStub({ defaultBranch: 'main', truncated: false, entries: [] });
-    const useCases = new VaultUseCases(gateway);
-    await expect(useCases.listVaults()).resolves.toEqual(VAULTS);
+    const result = await Effect.runPromise(Effect.provide(listVaults, provideStub(gateway)));
+    expect(result).toEqual(VAULTS);
     expect(gateway.listVaults).toHaveBeenCalledOnce();
   });
 
@@ -44,8 +52,7 @@ describe('VaultUseCases', () => {
         { path: '.obsidian/app.json', type: 'file' },
       ],
     });
-    const useCases = new VaultUseCases(gateway);
-    const tree = await useCases.openVault(REF);
+    const tree = await Effect.runPromise(Effect.provide(openVault(REF), provideStub(gateway)));
     expect(gateway.fetchTree).toHaveBeenCalledWith(REF);
     expect(tree.ref).toEqual(REF);
     expect(tree.defaultBranch).toBe('main');
@@ -57,11 +64,18 @@ describe('VaultUseCases', () => {
   it('ゲートウェイのエラーは VaultFetchError として伝播する', async () => {
     const gateway: VaultGateway = {
       listVaults: vi
-        .fn<() => Promise<readonly Vault[]>>()
-        .mockRejectedValue(new VaultFetchError('rate_limited', 'レートリミットに達しました。')),
-      fetchTree: vi.fn<(ref: VaultRef) => Promise<VaultTreeData>>(),
+        .fn<() => Effect.Effect<readonly Vault[], VaultFetchError>>()
+        .mockReturnValue(
+          Effect.fail(new VaultFetchError('rate_limited', 'レートリミットに達しました。')),
+        ),
+      fetchTree: vi.fn<(ref: VaultRef) => Effect.Effect<VaultTreeData, VaultFetchError>>(),
     };
-    const useCases = new VaultUseCases(gateway);
-    await expect(useCases.listVaults()).rejects.toThrow(VaultFetchError);
+    const result = await Effect.runPromise(
+      Effect.either(Effect.provide(listVaults, provideStub(gateway))),
+    );
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(VaultFetchError);
+    }
   });
 });

@@ -7,26 +7,28 @@
  * ディープリンク対応: ツリーは URL のみから復元する。ノートパス付き URL で
  * 開いた場合は、そのファイルまでの祖先ディレクトリを自動展開して選択状態を
  * 復元する。レスポンシブ: 狭い画面ではツリーを上部、ノートを下部に縦積みする。
+ *
+ * ユースケースの実行は組成ルート（src/composition）の run() 経由で行う。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 
-import type { VaultUseCases } from '@/application/vault';
+import { openVault } from '@/application/vault';
+import { run } from '@/composition';
 import type { VaultTree } from '@/domain/tree';
 import { ancestorDirectoryPaths } from '@/domain/tree';
 import type { VaultRef } from '@/domain/vault';
 import { vaultRefFullName } from '@/domain/vault';
 
-import { FileTree } from '../components/FileTree';
-import { Link } from '../components/Link';
-import type { ToastAction } from '../toast';
-import { isSessionExpiredError, vaultErrorMessage } from '../vault-error';
+import { FileTree } from '@/ui/components/FileTree';
+import { Link } from '@/ui/components/Link';
+import type { ToastAction } from '@/ui/toast';
+import { isSessionExpiredError, vaultErrorMessage } from '@/ui/vault-error';
 
 export interface VaultScreenProps {
   vaultRef: VaultRef;
   /** 選択中のノートパス（ツリー画面では null） */
   notePath: string | null;
-  useCases: VaultUseCases;
   notify: (message: string, action?: ToastAction) => void;
   onSessionExpired: () => void;
 }
@@ -36,13 +38,7 @@ type TreeState =
   | { kind: 'ready'; tree: VaultTree }
   | { kind: 'error'; message: string };
 
-export function VaultScreen({
-  vaultRef,
-  notePath,
-  useCases,
-  notify,
-  onSessionExpired,
-}: VaultScreenProps) {
+export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: VaultScreenProps) {
   const [state, setState] = useState<TreeState>({ kind: 'loading' });
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set(['']));
 
@@ -53,7 +49,7 @@ export function VaultScreen({
   const load = useCallback(async (): Promise<void> => {
     setState({ kind: 'loading' });
     try {
-      const tree = await useCases.openVault({ owner, name });
+      const tree = await run(openVault({ owner, name }));
       setState({ kind: 'ready', tree });
     } catch (error) {
       if (isSessionExpiredError(error)) {
@@ -65,7 +61,7 @@ export function VaultScreen({
       setState({ kind: 'error', message });
       notify(message, { label: '再試行', onClick: () => void load() });
     }
-  }, [useCases, owner, name, notify, onSessionExpired]);
+  }, [owner, name, notify, onSessionExpired]);
 
   useEffect(() => {
     void load();

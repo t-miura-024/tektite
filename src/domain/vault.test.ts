@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isVaultCandidate, isValidGitHubName, vaultRefFullName } from './vault';
+import { isVaultCandidate, isValidGitHubName, vaultRefFullName } from '@/domain/vault';
 
 describe('vaultRefFullName', () => {
   it('owner/name 形式の表示名を作る', () => {

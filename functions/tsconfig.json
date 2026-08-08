@@ -11,7 +11,11 @@
     "moduleDetection": "force",
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["@cloudflare/workers-types"]
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      "@/*": ["../src/*"],
+      "@functions/*": ["./*"]
+    }
   },
   "include": ["**/*.ts"]
 }

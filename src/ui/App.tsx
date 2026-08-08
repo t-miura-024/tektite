@@ -10,24 +10,25 @@
  * リロードしても URL から状態を復元する（useRoute / parseRoute 参照）。
  *
  * OAuth コールバック後の `?error=<code>` はトーストで知らせ、URL から取り除く。
+ *
+ * ユースケースの実行はすべて組成ルート（src/composition）の run() 経由で行う。
+ * UI 層は infra 層を import しない（依存の向きは src/composition.ts 参照）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { SessionFetchError, getCurrentSession, logout } from '@/application/session';
 import type { SessionUser } from '@/application/session';
-import { SessionFetchError, SessionUseCases } from '@/application/session';
-import { VaultUseCases } from '@/application/vault';
-import { HttpSessionGateway } from '@/infra/auth';
-import { HttpVaultGateway } from '@/infra/github';
+import { run } from '@/composition';
 
-import { Link } from './components/Link';
-import { Toast } from './components/Toast';
-import { useRoute } from './router';
-import { LoginScreen } from './screens/LoginScreen';
-import { NotFoundScreen } from './screens/NotFoundScreen';
-import { VaultPickerScreen } from './screens/VaultPickerScreen';
-import { VaultScreen } from './screens/VaultScreen';
-import type { ToastAction, ToastState } from './toast';
+import { Link } from '@/ui/components/Link';
+import { Toast } from '@/ui/components/Toast';
+import { useRoute } from '@/ui/router';
+import { LoginScreen } from '@/ui/screens/LoginScreen';
+import { NotFoundScreen } from '@/ui/screens/NotFoundScreen';
+import { VaultPickerScreen } from '@/ui/screens/VaultPickerScreen';
+import { VaultScreen } from '@/ui/screens/VaultScreen';
+import type { ToastAction, ToastState } from '@/ui/toast';
 
 type Phase =
   | { kind: 'loading' }
@@ -57,8 +58,6 @@ function consumeOAuthErrorParam(): string | null {
 }
 
 export function App() {
-  const sessionUseCases = useMemo(() => new SessionUseCases(new HttpSessionGateway()), []);
-  const vaultUseCases = useMemo(() => new VaultUseCases(new HttpVaultGateway()), []);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [toast, setToast] = useState<ToastState | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -67,7 +66,7 @@ export function App() {
   const checkSession = useCallback(async () => {
     setPhase({ kind: 'loading' });
     try {
-      const session = await sessionUseCases.getCurrentSession();
+      const session = await run(getCurrentSession);
       if (session.status === 'authenticated') {
         setPhase({ kind: 'authenticated', user: session.user });
       } else {
@@ -78,7 +77,7 @@ export function App() {
         error instanceof SessionFetchError ? error.message : 'セッションの確認に失敗しました。';
       setPhase({ kind: 'error', message });
     }
-  }, [sessionUseCases]);
+  }, []);
 
   useEffect(() => {
     const oauthError = consumeOAuthErrorParam();
@@ -97,7 +96,7 @@ export function App() {
   const handleLogout = useCallback(async () => {
     setLoggingOut(true);
     try {
-      await sessionUseCases.logout();
+      await run(logout);
       setPhase({ kind: 'anonymous' });
     } catch (error) {
       const message =
@@ -106,7 +105,7 @@ export function App() {
     } finally {
       setLoggingOut(false);
     }
-  }, [sessionUseCases]);
+  }, []);
 
   const handleSessionExpired = useCallback(() => {
     void checkSession();
@@ -118,11 +117,7 @@ export function App() {
   switch (route.kind) {
     case 'vaults':
       authenticatedContent = (
-        <VaultPickerScreen
-          useCases={vaultUseCases}
-          notify={notify}
-          onSessionExpired={handleSessionExpired}
-        />
+        <VaultPickerScreen notify={notify} onSessionExpired={handleSessionExpired} />
       );
       break;
     case 'tree':
@@ -131,7 +126,6 @@ export function App() {
         <VaultScreen
           vaultRef={route.ref}
           notePath={route.kind === 'note' ? route.notePath : null}
-          useCases={vaultUseCases}
           notify={notify}
           onSessionExpired={handleSessionExpired}
         />
