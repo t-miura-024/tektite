@@ -2,7 +2,7 @@
  * Vault 内画面（`/:owner/:repo` と `/:owner/:repo/blob/:path` の共通シェル）。
  *
  * - サイドバー: デフォルトブランチのファイルツリー（ディレクトリ開閉・ファイル選択）
- * - メインペイン: 選択中のノート（表示実装は次計画のためプレースホルダ）
+ * - メインペイン: 選択中のノート（CM6 エディタ。ノート未選択はプレースホルダ）
  *
  * ディープリンク対応: ツリーは URL のみから復元する。ノートパス付き URL で
  * 開いた場合は、そのファイルまでの祖先ディレクトリを自動展開して選択状態を
@@ -22,6 +22,7 @@ import { vaultRefFullName } from '@/domain/vault';
 
 import { FileTree } from '@/ui/components/FileTree';
 import { Link } from '@/ui/components/Link';
+import { NotePane } from '@/ui/components/NotePane';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError, vaultErrorMessage } from '@/ui/vault-error';
 
@@ -144,13 +145,12 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       </aside>
       <section className="vault-content">
         {notePath !== null ? (
-          <div className="note-pane">
-            <p className="note-pane-label">ノート</p>
-            <p className="note-pane-path" data-testid="note-path">
-              {notePath}
-            </p>
-            <p className="app-placeholder">ノートの表示は次の計画で実装されます。</p>
-          </div>
+          <NotePane
+            vaultRef={vaultRef}
+            notePath={notePath}
+            notify={notify}
+            onSessionExpired={onSessionExpired}
+          />
         ) : (
           <p className="app-placeholder">ツリーからファイルを選択してください。</p>
         )}

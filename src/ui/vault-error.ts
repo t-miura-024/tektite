@@ -3,6 +3,7 @@
  * エラー UX 基本方針: トースト表示 + リトライ導線。
  */
 
+import { NoteFetchError } from '@/application/note';
 import { VaultFetchError } from '@/application/vault';
 
 export function vaultErrorMessage(error: unknown): string {
@@ -23,7 +24,13 @@ export function vaultErrorMessage(error: unknown): string {
   return '予期しないエラーが発生しました。';
 }
 
-/** セッション失効（401）かどうか。該当時はログイン画面へ戻す */
+/**
+ * セッション失効（401）かどうか。該当時はログイン画面へ戻す。
+ * Vault 系とノート系のエラー種別は同じ kind 合併型を持つため、両方を判定する。
+ */
 export function isSessionExpiredError(error: unknown): boolean {
-  return error instanceof VaultFetchError && error.kind === 'unauthenticated';
+  return (
+    (error instanceof VaultFetchError || error instanceof NoteFetchError) &&
+    error.kind === 'unauthenticated'
+  );
 }

@@ -376,22 +376,49 @@ body {
   color: inherit;
 }
 
-/* ノートペイン（表示実装は次計画。プレースホルダ） */
+/* ノートペイン（選択中ノートのヘッダー + CM6 エディタ） */
 .note-pane {
-  padding: var(--space-md);
-  border: 1px dashed var(--color-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 65vh;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
-.note-pane-label {
-  margin: 0;
-  color: var(--color-fg-muted);
-  font-size: 0.75rem;
+@media (min-width: 48rem) {
+  .note-pane {
+    min-height: 70vh;
+  }
+}
+
+.note-pane-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-bg-subtle);
 }
 
 .note-pane-path {
-  margin: var(--space-xs) 0;
+  margin: 0;
   font-family: var(--font-mono);
   font-size: 0.875rem;
   word-break: break-all;
+}
+
+/* CM6 エディタ（高さはペイン内で伸縮。テーマ本体は src/infra/editor） */
+.note-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.note-editor .cm-editor {
+  height: 100%;
+}
+
+.note-editor .cm-editor.cm-focused {
+  outline: none;
 }

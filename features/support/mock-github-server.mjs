@@ -17,6 +17,7 @@
  * - GET  /user/repos                            … Vault 候補の検証用リポジトリ一覧（M3）
  * - GET  /repos/:owner/:repo                    … リポジトリ情報（デフォルトブランチ解決）（M3）
  * - GET  /repos/:owner/:repo/git/trees/:branch  … ファイルツリー（recursive 想定）（M3）
+ * - GET  /repos/:owner/:repo/contents/:path     … ノート本文 + sha（M1）
  */
 
 import { createServer } from 'node:http';
@@ -105,6 +106,26 @@ const TREES = {
     { path: 'README.md', type: 'blob' },
     { path: 'secrets.md', type: 'blob' },
   ],
+};
+
+/** Contents API 想定のノート本文と sha（キーは "owner/repo:path"） */
+const NOTES = {
+  'octocat/notes:README.md': {
+    sha: 'sha-readme',
+    content: '# README\n\ntektite の Vault です。\n',
+  },
+  'octocat/notes:daily/2026-08-07.md': {
+    sha: 'sha-2026-08-07',
+    content: '# 2026-08-07\n\n- 朝会メモ\n',
+  },
+  'octocat/notes:daily/2026-08-08.md': {
+    sha: 'sha-2026-08-08',
+    content: '# 2026-08-08\n\n- CM6 エディタ\n- ライブプレビュー\n',
+  },
+  'octocat/notes:projects/tektite.md': {
+    sha: 'sha-tektite',
+    content: '# tektite\n\nWeb で完結するマークダウンエディタ。\n',
+  },
 };
 
 function sendJson(res, status, body) {
@@ -204,6 +225,26 @@ const server = createServer(async (req, res) => {
       return;
     }
     sendJson(res, 200, repo);
+    return;
+  }
+
+  const contentsMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/contents\/(.+)$/);
+  if (req.method === 'GET' && contentsMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const notePath = decodeURIComponent(contentsMatch[3] ?? '');
+    const note = NOTES[`${contentsMatch[1]}/${contentsMatch[2]}:${notePath}`];
+    if (!note) {
+      sendJson(res, 404, { message: 'Not Found' });
+      return;
+    }
+    sendJson(res, 200, {
+      type: 'file',
+      encoding: 'base64',
+      content: Buffer.from(note.content, 'utf8').toString('base64'),
+      sha: note.sha,
+    });
     return;
   }
 

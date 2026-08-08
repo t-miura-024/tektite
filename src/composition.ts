@@ -11,16 +11,30 @@
 
 import { Cause, Effect, Exit, Layer, Option } from 'effect';
 
+import { NoteGateway } from '@/application/note';
 import type { SessionGateway } from '@/application/session';
 import type { VaultGateway } from '@/application/vault';
+import { createEditorView as createEditorViewImpl } from '@/infra/editor/editor';
+import type { EditorHandle } from '@/infra/editor/editor';
 import { SessionGatewayLive } from '@/infra/auth/session-gateway';
-import { VaultGatewayLive } from '@/infra/github/http-gateway';
+import { NoteGatewayLive, VaultGatewayLive } from '@/infra/github/http-gateway';
 
 /** 本アプリが組み立てる全ポートの実装 */
-export const MainLive = Layer.merge(SessionGatewayLive, VaultGatewayLive);
+export const MainLive = Layer.merge(
+  Layer.merge(SessionGatewayLive, VaultGatewayLive),
+  NoteGatewayLive,
+);
 
 /** MainLive が満たすポートの組（ユースケースが要求しうるコンテキスト） */
-export type MainContext = SessionGateway | VaultGateway;
+export type MainContext = SessionGateway | VaultGateway | NoteGateway;
+
+/**
+ * CM6 エディタ生成。UI 層は infra を直接 import できないため（.oxlintrc.json）、
+ * この組成ルートだけが infra を知るという既存規約に沿ってここで公開する。
+ * UI は opaque な EditorHandle だけを扱い、CM6 の型には依存しない。
+ */
+export const createEditorView: (parent: HTMLElement, doc: string) => EditorHandle =
+  createEditorViewImpl;
 
 /**
  * application 層のユースケース（Effect プログラム）を MainLive で組成して実行し、
