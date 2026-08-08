@@ -58,14 +58,21 @@ export async function githubApiFetch(
   baseUrl: string,
   path: string,
   token: string,
+  init: { method?: string; body?: string } = {},
 ): Promise<Response> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'tektite',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (init.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
   return fetch(`${baseUrl}${path}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'tektite',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
+    method: init.method ?? 'GET',
+    headers,
+    body: init.body,
   });
 }
 

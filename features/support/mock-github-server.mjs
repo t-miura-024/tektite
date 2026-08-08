@@ -12,12 +12,19 @@
  *
  * エンドポイント:
  * - GET  /__health                              … webServer の起動確認用
+ * - POST /__mock/contents/:owner/:repo/:path    … モック内部のノート内容を直接変更（Conflict 再現用）（M3）
  * - POST /login/oauth/access_token              … code=e2e-test-code ならテストトークンを返す
  * - GET  /user                                  … テストトークンなら octocat を返す
  * - GET  /user/repos                            … Vault 候補の検証用リポジトリ一覧（M3）
  * - GET  /repos/:owner/:repo                    … リポジトリ情報（デフォルトブランチ解決）（M3）
  * - GET  /repos/:owner/:repo/git/trees/:branch  … ファイルツリー（recursive 想定）（M3）
  * - GET  /repos/:owner/:repo/contents/:path     … ノート本文 + sha（M1）
+ * - PUT  /repos/:owner/:repo/contents/:path     … ノート保存（sha 楽観ロック + 409 シミュレーション）（M3）
+ *
+ * PUT の 409 シミュレーション: body.sha が保存済みの sha と一致しない場合に
+ * 409 { message: 'sha does not match current blob sha' } を返す（GitHub 実挙動の模倣）。
+ * E2E で「読込後にリモートが変更された」状態を作るには、保存前の読み込みの後に
+ * POST /__mock/contents/... でモック内の保存状態（sha 含む）を変更してから PUT する。
  */
 
 import { createServer } from 'node:http';
@@ -134,6 +141,9 @@ const NOTES = {
   },
 };
 
+/** テストシーム（POST /__mock/contents/...）で採番する sha の連番 */
+let MOCK_SHA_COUNTER = 0;
+
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
@@ -164,6 +174,24 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/__health') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+
+  // モック内部の保存状態を直接変更するテストシーム（GitHub API とは別系統）。
+  // 別クライアントによるリモート変更を再現し、その後の PUT を 409 に導く。
+  const mockContentsMatch = url.pathname.match(/^\/__mock\/contents\/([^/]+)\/([^/]+)\/(.+)$/);
+  if (req.method === 'POST' && mockContentsMatch) {
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    if (typeof body.content !== 'string') {
+      sendJson(res, 400, { message: 'content must be a string' });
+      return;
+    }
+    const notePath = decodeURIComponent(mockContentsMatch[3] ?? '');
+    const key = `${mockContentsMatch[1]}/${mockContentsMatch[2]}:${notePath}`;
+    const sha = `sha-mock-${++MOCK_SHA_COUNTER}`;
+    NOTES[key] = { sha, content: body.content };
+    sendJson(res, 200, { sha });
     return;
   }
 
@@ -250,6 +278,37 @@ const server = createServer(async (req, res) => {
       encoding: 'base64',
       content: Buffer.from(note.content, 'utf8').toString('base64'),
       sha: note.sha,
+    });
+    return;
+  }
+
+  if (req.method === 'PUT' && contentsMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const notePath = decodeURIComponent(contentsMatch[3] ?? '');
+    const key = `${contentsMatch[1]}/${contentsMatch[2]}:${notePath}`;
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    if (typeof body.content !== 'string' || body.content.length === 0) {
+      sendJson(res, 400, { message: 'content must be a base64 string' });
+      return;
+    }
+    const existing = NOTES[key];
+    // sha 楽観ロック: 更新時（既存ファイル）は読込時の sha と一致しないと 409。
+    // これが 409（Conflict）シミュレーションそのもので、一致しない sha を渡せば再現できる。
+    if (existing && body.sha !== existing.sha) {
+      sendJson(res, 409, { message: 'sha does not match current blob sha' });
+      return;
+    }
+    const content = Buffer.from(body.content, 'base64').toString('utf8');
+    const sha = `sha-saved-${++MOCK_SHA_COUNTER}`;
+    NOTES[key] = { sha, content };
+    sendJson(res, 200, {
+      type: 'file',
+      encoding: 'base64',
+      content: body.content,
+      sha,
     });
     return;
   }

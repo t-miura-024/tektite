@@ -5,6 +5,7 @@
  * - GET /api/vaults                          … Vault 候補一覧（functions/api/vaults）
  * - GET /api/tree/:owner/:repo               … ファイルツリー（functions/api/tree）
  * - GET /api/notes/:owner/:repo/blob/:path   … ノート本文 + sha（functions/api/notes）
+ * - PUT /api/notes/:owner/:repo/blob/:path   … ノート保存（sha 楽観ロック）（functions/api/notes）
  *   （path は / 区切りを 1 セグメントにエンコードして渡す）
  *
  * GitHub トークンは Workers 側のみ保持（ADR-0002）のため、ブラウザは
@@ -17,8 +18,8 @@
 
 import { Effect, Layer } from 'effect';
 
-import { NoteFetchError, NoteGateway } from '@/application/note';
-import type { NoteContent } from '@/application/note';
+import { NoteFetchError, NoteGateway, NoteSaveError } from '@/application/note';
+import type { NoteContent, NoteSaveRequest, NoteSaveResult } from '@/application/note';
 import { VaultFetchError, VaultGateway } from '@/application/vault';
 import type { VaultTreeData } from '@/application/vault';
 import type { TreeEntry } from '@/domain/tree';
@@ -32,7 +33,7 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-/** プロキシ系エラーの kind（Vault / ノートで共通の文字列合併型） */
+/** プロキシ系エラーの kind（Vault / ノート取得で共通の文字列合併型） */
 type FetchErrorKind = 'unauthenticated' | 'rate_limited' | 'not_found' | 'server' | 'network';
 
 /** kind を持つ Error 派生クラスのコンストラクタ（VaultFetchError / NoteFetchError） */
@@ -72,6 +73,53 @@ function requestJson<E extends Error>(
     return yield* Effect.tryPromise({
       try: () => response.json(),
       catch: (error) => new ErrorCtor('server', 'サーバー応答の形式が不正です。', { cause: error }),
+    });
+  });
+}
+
+/**
+ * ノート保存（PUT）専用のリクエスト。取得系（requestJson）と違って JSON ボディを
+ * 送り、409（sha 楽観ロック競合）を conflict として区別して返す。
+ */
+function requestSave(path: string, body: unknown): Effect.Effect<unknown, NoteSaveError> {
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch(path, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      catch: (error) =>
+        new NoteSaveError('network', 'サーバーと通信できませんでした。', { cause: error }),
+    });
+    if (response.status === 401) {
+      return yield* Effect.fail(
+        new NoteSaveError('unauthenticated', 'セッションの有効期限が切れました。'),
+      );
+    }
+    if (response.status === 429) {
+      return yield* Effect.fail(
+        new NoteSaveError('rate_limited', 'GitHub API のレートリミットに達しました。'),
+      );
+    }
+    if (response.status === 404) {
+      return yield* Effect.fail(new NoteSaveError('not_found', 'リソースが見つかりませんでした。'));
+    }
+    if (response.status === 409) {
+      return yield* Effect.fail(
+        new NoteSaveError('conflict', '保存前にリモートの内容が変更されていました。'),
+      );
+    }
+    if (!response.ok) {
+      return yield* Effect.fail(
+        new NoteSaveError('server', `保存に失敗しました（HTTP ${response.status}）。`),
+      );
+    }
+    return yield* Effect.tryPromise({
+      try: () => response.json(),
+      catch: (error) =>
+        new NoteSaveError('server', 'サーバー応答の形式が不正です。', { cause: error }),
     });
   });
 }
@@ -143,11 +191,27 @@ function parseNoteBody(body: unknown): NoteContent | null {
   return { path: notePath, sha, content };
 }
 
+/** /api/notes 保存応答を NoteSaveResult にパースする（形式不正は null） */
+function parseNoteSaveBody(body: unknown): NoteSaveResult | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+  const notePath = readString(body.path);
+  const sha = readString(body.sha);
+  if (!notePath || !sha) {
+    return null;
+  }
+  return { path: notePath, sha };
+}
+
 const invalidVaultResponse = () =>
   Effect.fail(new VaultFetchError('server', 'サーバー応答の形式が不正です。'));
 
 const invalidNoteResponse = () =>
   Effect.fail(new NoteFetchError('server', 'サーバー応答の形式が不正です。'));
+
+const invalidNoteSaveResponse = () =>
+  Effect.fail(new NoteSaveError('server', 'サーバー応答の形式が不正です。'));
 
 /** VaultGateway の本番実装（Pages Functions 経由） */
 export const VaultGatewayLive = Layer.succeed(VaultGateway, {
@@ -186,5 +250,21 @@ export const NoteGatewayLive = Layer.succeed(NoteGateway, {
         return yield* invalidNoteResponse();
       }
       return note;
+    }),
+
+  saveNote: (ref: VaultRef, notePath: string, request: NoteSaveRequest) =>
+    Effect.gen(function* () {
+      const path = `/api/notes/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/blob/${encodeURIComponent(notePath)}`;
+      // sha が null の新規作成は JSON からキーごと落とす（プロキシが Create として扱う）
+      const body = yield* requestSave(path, {
+        content: request.content,
+        message: request.message,
+        ...(request.sha === null ? {} : { sha: request.sha }),
+      });
+      const saved = parseNoteSaveBody(body);
+      if (saved === null) {
+        return yield* invalidNoteSaveResponse();
+      }
+      return saved;
     }),
 });
