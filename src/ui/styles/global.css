@@ -607,24 +607,24 @@ body {
   margin-block: var(--space-lg);
 }
 
-/* WikiLink（壊れリンクは赤系で可視化する） */
-.reading-content .wikilink {
+/* WikiLink（壊れリンクは赤系で可視化する。装飾クラスはエディタの tk- と統一） */
+.reading-content .tk-wikilink {
   color: var(--color-accent);
   text-decoration: none;
 }
 
-.reading-content .wikilink:hover {
+.reading-content .tk-wikilink:hover {
   text-decoration: underline;
 }
 
-.reading-content .wikilink-broken {
+.reading-content .tk-wikilink-broken {
   color: var(--color-danger);
   text-decoration: underline dotted;
   opacity: 0.85;
 }
 
 /* タグ */
-.reading-content .tag {
+.reading-content .tk-tag {
   display: inline-block;
   padding: 0 var(--space-sm);
   border-radius: 999px;
@@ -669,7 +669,7 @@ body {
 }
 
 .reading-content .note-embed-image-fallback,
-.reading-content .embed-broken {
+.reading-content .tk-embed-broken {
   color: var(--color-danger);
   font-size: 0.875rem;
 }

@@ -110,6 +110,7 @@ const TREES = {
     { path: 'embeds.md', type: 'blob' },
     { path: 'projects', type: 'tree' },
     { path: 'projects/tektite.md', type: 'blob' },
+    { path: 'render.md', type: 'blob' },
     { path: 'tags.md', type: 'blob' },
     { path: 'wiki.md', type: 'blob' },
   ],
@@ -161,6 +162,12 @@ const NOTES = {
   'octocat/notes:embeds.md': {
     sha: 'sha-embeds',
     content: '# 埋め込み\n\n![[attachments/logo.png]]\n\n![[tags]]\n',
+  },
+  // 描画拡張（数式 / コールアウト / タスクリスト / コードハイライト）の E2E 用
+  'octocat/notes:render.md': {
+    sha: 'sha-render',
+    content:
+      '# 描画サンプル\n\n数式: $a^2 + b^2 = c^2$\n\n> [!note] メモ\n> コールアウトの本文です\n\n- [ ] 未完了タスク\n- [x] 完了タスク\n\n```ts\nconst value: number = 1;\n```\n',
   },
   // 画像（raw 配信）。rawContent は GET /contents が Accept:
   // application/vnd.github.raw のときバイナリとして返す

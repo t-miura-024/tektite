@@ -72,6 +72,51 @@ Then('リーディング表示に見出し {string} が表示される', async (
   ).toBeInViewport();
 });
 
+Then('エディタに見出し {string} が表示される', async ({ page }, text: string) => {
+  // エディタはソース表示のため、見出し行（# で始まる行）がビューポート内に
+  // スクロールされていることを確認する（見出し遷移の検証）
+  await expect(
+    page
+      .getByTestId('note-editor')
+      .locator('.cm-line')
+      .filter({ hasText: new RegExp(`^#{1,6} ${escapeRegExp(text)}$`) }),
+  ).toBeInViewport();
+});
+
+Then('リーディング表示にフロントマテリアが表示される', async ({ page }) => {
+  await expect(page.getByTestId('note-frontmatter')).toBeVisible();
+});
+
+Then(
+  'フロントマテリアに項目 {string} が値 {string} で表示される',
+  async ({ page }, key: string, value: string) => {
+    const field = page
+      .getByTestId('note-frontmatter')
+      .locator('.note-frontmatter-field')
+      .filter({ hasText: key });
+    await expect(field.locator('dt')).toHaveText(key);
+    await expect(field.locator('dd')).toHaveText(value);
+  },
+);
+
+Then('リーディング表示に数式が表示される', async ({ page }) => {
+  await expect(page.getByTestId('reading-view').locator('.katex')).toBeVisible();
+});
+
+Then('リーディング表示にコールアウト {string} が表示される', async ({ page }, title: string) => {
+  await expect(
+    page.getByTestId('reading-view').locator('.callout-title').getByText(title, { exact: true }),
+  ).toBeVisible();
+});
+
+Then('リーディング表示にタスクリストが表示される', async ({ page }) => {
+  await expect(page.getByTestId('reading-view').locator('.task-list-checkbox')).toHaveCount(2);
+});
+
+Then('リーディング表示にハイライトされたコードが表示される', async ({ page }) => {
+  await expect(page.getByTestId('reading-view').locator('pre code.hljs')).toHaveCount(1);
+});
+
 Then('リーディング表示に画像が表示される', async ({ page }) => {
   // 読み込み失敗時は onError で span に置き換わるため、img の存在 = 表示成功
   await expect(

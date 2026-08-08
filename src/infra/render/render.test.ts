@@ -25,7 +25,7 @@ describe('WikiLink', () => {
       optionsFor({ 'root.md': '[[note]]', 'note.md': 'hi' }),
     );
     expect(result.html).toContain(
-      '<a class="wikilink" href="/octocat/notes/blob/note.md" data-note-path="note.md" data-subpath="">note</a>',
+      '<a class="tk-wikilink" href="/octocat/notes/blob/note.md" data-note-path="note.md" data-subpath="">note</a>',
     );
   });
 
@@ -58,7 +58,7 @@ describe('WikiLink', () => {
       '[[missing]]',
       optionsFor({ 'root.md': '[[missing]]' }),
     );
-    expect(result.html).toContain('class="wikilink wikilink-broken"');
+    expect(result.html).toContain('class="tk-wikilink tk-wikilink-broken"');
     expect(result.html).not.toContain('href=');
   });
 
@@ -67,7 +67,7 @@ describe('WikiLink', () => {
       '[[logo.png]]',
       optionsFor({ 'root.md': '[[logo.png]]', 'logo.png': '' }),
     );
-    expect(result.html).toContain('wikilink-broken');
+    expect(result.html).toContain('tk-wikilink-broken');
   });
 
   it('見出しリンクのスラグは対象ノートの見出し id と一致する', async () => {
@@ -84,12 +84,12 @@ describe('WikiLink', () => {
 });
 
 describe('Tag', () => {
-  it('インラインタグを <span class="tag"> に変換する', async () => {
+  it('インラインタグを <span class="tk-tag"> に変換する', async () => {
     const result = await renderNoteMarkdown(
       'タグ #area/project です',
       optionsFor({ 'root.md': 'タグ #area/project です' }),
     );
-    expect(result.html).toContain('<span class="tag">#area/project</span>');
+    expect(result.html).toContain('<span class="tk-tag">#area/project</span>');
   });
 });
 
@@ -109,7 +109,7 @@ describe('Embed', () => {
       '![[missing.png]]',
       optionsFor({ 'root.md': '![[missing.png]]' }),
     );
-    expect(result.html).toContain('<span class="embed-broken">![[missing.png]]</span>');
+    expect(result.html).toContain('<span class="tk-embed tk-embed-broken">![[missing.png]]</span>');
   });
 
   it('ノート Embed を本文展開に変換する（前後の段落は保持される）', async () => {
@@ -152,7 +152,67 @@ describe('Embed', () => {
 
   it('本文が取得できない Embed は壊れ埋め込みとして描画する', async () => {
     const result = await renderNoteMarkdown('![[ghost]]', optionsFor({ 'root.md': '![[ghost]]' }));
-    expect(result.html).toContain('<span class="embed-broken">![[ghost]]</span>');
+    expect(result.html).toContain('<span class="tk-embed tk-embed-broken">![[ghost]]</span>');
+  });
+
+  // 配置別の注入テスト（difit 指摘: ブロック要素の注入は配置によって
+  // 不正な HTML（<p> 内の <div>）になりうるため、配置ごとに検証する）
+
+  it('文書先頭のノート Embed を本文展開に変換する', async () => {
+    const result = await renderNoteMarkdown(
+      '![[child]]\n\n後続の本文',
+      optionsFor({ 'root.md': '![[child]]\n\n後続の本文', 'child.md': '子の本文' }),
+    );
+    expect(result.html.trim().startsWith('<div class="note-embed"')).toBe(true);
+    expect(result.html).toContain('<p>後続の本文</p>');
+    expect(result.html).not.toContain('<p><div');
+    expect(result.html).not.toContain('</div></p>');
+  });
+
+  it('段落内のノート Embed は段落を分断して注入する（<p> 内に <div> が入らない）', async () => {
+    const result = await renderNoteMarkdown(
+      '前の段落の続き ![[child]] 後の続き',
+      optionsFor({ 'root.md': '前の段落の続き ![[child]] 後の続き', 'child.md': '子の本文' }),
+    );
+    expect(result.html).toContain('<p>前の段落の続き </p>');
+    expect(result.html).toContain('<div class="note-embed" data-embed-path="child.md">');
+    expect(result.html).toContain('<p> 後の続き</p>');
+    expect(result.html).not.toContain('<p><div');
+    expect(result.html).not.toContain('</div></p>');
+  });
+
+  it('リスト項目内のノート Embed はリストを壊さず注入する', async () => {
+    const result = await renderNoteMarkdown(
+      '- 前\n- ![[child]]\n- 後',
+      optionsFor({ 'root.md': '- 前\n- ![[child]]\n- 後', 'child.md': '子の本文' }),
+    );
+    expect(result.html).toContain('<li>前</li>');
+    expect(result.html).toContain('<div class="note-embed" data-embed-path="child.md">');
+    expect(result.html).toContain('<li>後</li>');
+    expect(result.html).not.toContain('<p><div');
+    expect(result.html).not.toContain('</div></p>');
+  });
+
+  it('埋め込みのみの本文は Embed ブロックをルート要素として返す', async () => {
+    const result = await renderNoteMarkdown(
+      '![[child]]',
+      optionsFor({ 'root.md': '![[child]]', 'child.md': '子の本文' }),
+    );
+    const trimmed = result.html.trim();
+    expect(trimmed.startsWith('<div class="note-embed" data-embed-path="child.md">')).toBe(true);
+    expect(trimmed.endsWith('</div>')).toBe(true);
+    expect(trimmed).not.toContain('<p><div');
+  });
+
+  it('連続するノート Embed をそれぞれ展開する', async () => {
+    const result = await renderNoteMarkdown(
+      '![[a]]\n\n![[b]]',
+      optionsFor({ 'root.md': '![[a]]\n\n![[b]]', 'a.md': 'A', 'b.md': 'B' }),
+    );
+    const embeds = result.html.match(/class="note-embed"/g) ?? [];
+    expect(embeds.length).toBe(2);
+    expect(result.html).not.toContain('<p><div');
+    expect(result.html).not.toContain('</div></p>');
   });
 });
 
@@ -210,7 +270,7 @@ describe('コールアウト / 引用 / タスクリスト', () => {
       '> [!note] 参照\n> [[note]] と $x$',
       optionsFor({ 'root.md': '> [!note] 参照\n> [[note]] と $x$', 'note.md': 'hi' }),
     );
-    expect(result.html).toContain('class="wikilink"');
+    expect(result.html).toContain('class="tk-wikilink"');
     expect(result.html).toContain('class="katex"');
   });
 
@@ -335,8 +395,8 @@ describe('コード内の記法は変換しない', () => {
       '```\n[[note]] #tag\n```',
       optionsFor({ 'root.md': '```\n[[note]] #tag\n```', 'note.md': 'hi' }),
     );
-    expect(result.html).not.toContain('class="wikilink"');
-    expect(result.html).not.toContain('class="tag"');
+    expect(result.html).not.toContain('class="tk-wikilink"');
+    expect(result.html).not.toContain('class="tk-tag"');
     expect(result.html).toContain('[[note]] #tag');
   });
 
@@ -345,7 +405,7 @@ describe('コード内の記法は変換しない', () => {
       '`[[note]]`',
       optionsFor({ 'root.md': '`[[note]]`', 'note.md': 'hi' }),
     );
-    expect(result.html).not.toContain('class="wikilink"');
+    expect(result.html).not.toContain('class="tk-wikilink"');
     expect(result.html).toContain('<code>[[note]]</code>');
   });
 });

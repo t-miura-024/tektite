@@ -7,7 +7,7 @@
  * - WikiLink → <a>（エイリアス表示・見出しリンク。壊れリンクは専用スタイル）
  * - Embed   → 画像 <img>（raw プロキシ URL は呼び出し側が注入）/
  *   ノート本文の再帰展開（循環参照・深さ上限は domain の embed.ts が処理済み）
- * - Tag     → <span class="tag">
+ * - Tag     → <span class="tk-tag">
  * - 数式    → KaTeX（$...$ / $$...$$。動的 import。失敗時はフォールバック表示）
  * - コールアウト（> [!note] など）→ 専用ブロック
  * - タスクリスト → チェックボックス付きリスト
@@ -201,7 +201,7 @@ function renderDocument(
 
 /** 壊れ埋め込みの表示（解決不能・取得失敗） */
 function brokenEmbed(target: string): string {
-  return `<span class="embed-broken">![[${escapeHtml(target)}]]</span>`;
+  return `<span class="tk-embed tk-embed-broken">![[${escapeHtml(target)}]]</span>`;
 }
 
 /** WikiLink を <a> に変換する（壊れリンク / ノート以外のファイルは専用スタイル） */
@@ -209,17 +209,17 @@ function renderWikilink(span: WikiLinkSpan, options: RenderNotationOptions): str
   const resolved = resolveNotePath(span.target, options.filePaths);
   const display = escapeHtml(span.alias ?? noteDisplayName(resolved ?? span.target));
   if (resolved === null || !resolved.endsWith('.md')) {
-    return `<a class="wikilink wikilink-broken" data-broken-link="true" title="リンク先が見つかりません">${display}</a>`;
+    return `<a class="tk-wikilink tk-wikilink-broken" data-broken-link="true" title="リンク先が見つかりません">${display}</a>`;
   }
   return (
-    `<a class="wikilink" href="${escapeHtml(options.linkHref(resolved, span.subpath), true)}"` +
+    `<a class="tk-wikilink" href="${escapeHtml(options.linkHref(resolved, span.subpath), true)}"` +
     ` data-note-path="${escapeHtml(resolved, true)}" data-subpath="${escapeHtml(span.subpath ?? '', true)}">${display}</a>`
   );
 }
 
-/** タグを <span class="tag"> に変換する（クリック動作は MVP 対象外） */
+/** タグを <span class="tk-tag"> に変換する（クリック動作は MVP 対象外） */
 function renderTag(span: TagSpan): string {
-  return `<span class="tag">#${escapeHtml(span.tag)}</span>`;
+  return `<span class="tk-tag">#${escapeHtml(span.tag)}</span>`;
 }
 
 /** パスから表示名（拡張子を除いた最終セグメント）を得る */

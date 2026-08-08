@@ -33,7 +33,7 @@ import { ConflictPanel } from '@/ui/components/ConflictPanel';
 import { NoteEditor } from '@/ui/components/NoteEditor';
 import { ReadingView } from '@/ui/components/ReadingView';
 import { noteErrorMessage, noteSaveErrorMessage } from '@/ui/note-error';
-import { navigate, noteRoutePath } from '@/ui/router';
+import { navigate, noteRoutePath, NAVIGATE_EVENT_NAME } from '@/ui/router';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError } from '@/ui/vault-error';
 
@@ -45,6 +45,27 @@ export interface NotePaneProps {
   filePaths: readonly string[];
   notify: (message: string, action?: ToastAction) => void;
   onSessionExpired: () => void;
+  /**
+   * 保存成功時に呼ばれる（パス + 保存後の本文）。
+   * VaultScreen が記法索引のキャッシュを更新するために使う（再取得なし）。
+   */
+  onNoteSaved?: (path: string, content: string) => void;
+}
+
+/**
+ * 本文内でスラグが一致する見出しの行番号（1 始まり）を返す。
+ * リーディング表示の見出し id（slugify）と一致する規則で照合する。
+ * 見つからない場合は null。
+ */
+function headingLineForSlug(content: string, slug: string): number | null {
+  const lines = content.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^#{1,6}\s+(.+)$/.exec(lines[index] ?? '');
+    if (match && slugify((match[1] ?? '').trim()) === slug) {
+      return index + 1;
+    }
+  }
+  return null;
 }
 
 type LoadState =
@@ -72,6 +93,7 @@ export function NotePane({
   filePaths,
   notify,
   onSessionExpired,
+  onNoteSaved,
 }: NotePaneProps) {
   const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading' });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('clean');
@@ -120,9 +142,51 @@ export function NotePane({
     [owner, name, notePath],
   );
 
-  const handleEditorReady = useCallback((handle: EditorHandle | null) => {
-    handleRef.current = handle;
-  }, []);
+  /**
+   * URL ハッシュ（#スラグ）に対応する見出し行へエディタをスクロールする。
+   * エディタ（ライブプレビュー）は本文をソース表示するため見出し id を持つ
+   * DOM は存在せず、本文の見出し行をスラグで特定してスクロールする
+   * （リーディング表示は ReadingView が同じ #スラグでスクロールする）。
+   * 表示モードではエディタが非表示のため何もしない（ReadingView が担う）。
+   */
+  const scrollEditorToHash = useCallback((): void => {
+    if (mode !== 'edit') {
+      return;
+    }
+    const hash = window.location.hash;
+    if (hash.length <= 1) {
+      return;
+    }
+    const slug = decodeURIComponent(hash.slice(1));
+    const line = headingLineForSlug(contentRef.current, slug);
+    if (line !== null) {
+      handleRef.current?.scrollToLine(line);
+    }
+  }, [mode]);
+
+  const handleEditorReady = useCallback(
+    (handle: EditorHandle | null) => {
+      handleRef.current = handle;
+      // ノート読み込み後にエディタが生成されるため、マウント時点のハッシュ遷移
+      // （ディープリンク・WikiLink クリック）はここでもスクロールを試みる
+      if (handle !== null) {
+        scrollEditorToHash();
+      }
+    },
+    [scrollEditorToHash],
+  );
+
+  // エディタモードでの #見出し 遷移: URL 変更イベントのたびに見出し行へ
+  // スクロールする（リロード・SPA 遷移・同一ノート内遷移のすべてで動く）
+  useEffect(() => {
+    scrollEditorToHash();
+    window.addEventListener('hashchange', scrollEditorToHash);
+    window.addEventListener(NAVIGATE_EVENT_NAME, scrollEditorToHash);
+    return () => {
+      window.removeEventListener('hashchange', scrollEditorToHash);
+      window.removeEventListener(NAVIGATE_EVENT_NAME, scrollEditorToHash);
+    };
+  }, [notePath, scrollEditorToHash]);
 
   /**
    * エディタ内の WikiLink クリック: SPA 内遷移（リーディング表示と同様の
@@ -190,6 +254,9 @@ export function NotePane({
         const result = await run(
           saveNoteContent({ owner, name }, notePath, { content, baseSha: shaRef.current }),
         );
+        // サーバーの状態は変わったため、ノート切替レースの世代ガードより先に
+        // 索引キャッシュへ反映する（再取得なしで最新化する）
+        onNoteSaved?.(notePath, content);
         if (generation !== generationRef.current) {
           // 保存中にノートが切り替わった: 旧ノートの結果を新しいノートへ適用しない
           return;
@@ -225,7 +292,7 @@ export function NotePane({
         setSaveStatus('dirty');
       }
     },
-    [owner, name, notePath, notify, onSessionExpired, setDirty, enterConflict],
+    [owner, name, notePath, notify, onSessionExpired, setDirty, enterConflict, onNoteSaved],
   );
 
   // Cmd+S リスナーから最新の performSave を呼ぶための ref
@@ -272,6 +339,8 @@ export function NotePane({
           baseSha: conflict.remote.sha,
         }),
       );
+      // 上書き保存成功: 索引キャッシュへ反映する（再取得なし）
+      onNoteSaved?.(notePath, conflict.local);
       if (generation !== generationRef.current) {
         return;
       }
@@ -312,6 +381,8 @@ export function NotePane({
     const generation = generationRef.current;
     contentRef.current = conflict.remote.content;
     shaRef.current = conflict.remote.sha;
+    // 取り込み後はリモート内容が現在の本文になるため索引キャッシュへ反映する
+    onNoteSaved?.(notePath, conflict.remote.content);
     await run(clearDraft({ owner, name }, notePath)).catch(() => {});
     if (generation !== generationRef.current) {
       // 取り込み中にノートが切り替わった: 旧ノートの状態を新しいノートへ適用しない

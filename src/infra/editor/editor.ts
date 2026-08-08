@@ -46,6 +46,12 @@ export interface EditorHandle {
   /** 本文を置き換える（同一内容のときは何もしない。Draft 復元・競合解決用） */
   readonly setContent: (content: string) => void;
   /**
+   * 指定行（1 始まり）へカーソルを移動してスクロールする。
+   * エディタモードでの見出し遷移（#スラグ付き WikiLink クリック）に使う。
+   * 行番号は 1..最終行 にクランプする。
+   */
+  readonly scrollToLine: (line: number) => void;
+  /**
    * フォーカス喪失の通知を購読する。エディタ外へのフォーカス移動・ウィンドウ
    * blur・エディタ破棄を問わない「エディタからのフォーカス喪失すべて」が
    * 単一ルールで通知される（自動保存のトリガー）。
@@ -225,6 +231,15 @@ export function createEditorView(
         return;
       }
       view.dispatch({ changes: { from: 0, to: current.length, insert: content } });
+    },
+    scrollToLine: (line: number) => {
+      const document = view.state.doc;
+      const clamped = Math.min(Math.max(1, line), document.lines);
+      const pos = document.line(clamped).from;
+      view.dispatch({
+        selection: { anchor: pos },
+        effects: EditorView.scrollIntoView(pos, { y: 'start' }),
+      });
     },
     onBlur: (callback) => {
       blurCallbacks.add(callback);

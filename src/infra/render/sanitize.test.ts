@@ -28,9 +28,9 @@ describe('sanitizeHtml', () => {
 
   it('WikiLink のマークアップ（class / href / data 属性）を保持する', () => {
     const html =
-      '<a class="wikilink" href="/octocat/notes/blob/note.md" data-note-path="note.md" data-subpath="見出し">note</a>';
+      '<a class="tk-wikilink" href="/octocat/notes/blob/note.md" data-note-path="note.md" data-subpath="見出し">note</a>';
     const sanitized = sanitizeHtml(html);
-    expect(sanitized).toContain('class="wikilink"');
+    expect(sanitized).toContain('class="tk-wikilink"');
     expect(sanitized).toContain('data-note-path="note.md"');
     expect(sanitized).toContain('href="/octocat/notes/blob/note.md"');
   });
@@ -52,5 +52,69 @@ describe('sanitizeHtml', () => {
 
   it('見出しの id を保持する（スラグ遷移に必要）', () => {
     expect(sanitizeHtml('<h2 id="usage">Usage</h2>')).toContain('id="usage"');
+  });
+});
+
+describe('埋め込み注入後の HTML はサニタイズ後も壊れない', () => {
+  // renderNoteMarkdown はノード環境でも動く（KaTeX / highlight.js は動的
+  // import）。配置の異なる入力に対し、出力 HTML を DOMPurify に通しても
+  // <div class="note-embed"> が <p> の内側に閉じ込められないことを検証する。
+
+  it('段落内の埋め込みは DOMPurify 後も <p> の外に保たれる', async () => {
+    const { renderNoteMarkdown } = await import('@/infra/render/render');
+    const result = await renderNoteMarkdown('前 ![[child]] 後', {
+      path: 'root.md',
+      contents: new Map([
+        ['root.md', '前 ![[child]] 後'],
+        ['child.md', '子の本文'],
+      ]),
+      filePaths: ['root.md', 'child.md'],
+      imageUrl: (p) => `/api/raw/o/r/${encodeURIComponent(p)}`,
+      linkHref: (p, sub) => `/octocat/notes/blob/${p}${sub !== null ? `#${sub}` : ''}`,
+    });
+    const sanitized = sanitizeHtml(result.html);
+    expect(sanitized).toContain('<div class="note-embed"');
+    expect(sanitized).not.toContain('<p><div');
+    expect(sanitized).not.toContain('</div></p>');
+    // DOMPurify は DOM パース経由のため、不正なネストは自動修正される。
+    // 実 DOM でも <p> 内に埋め込み div が入らないことを確認する
+    const document = new DOMParser().parseFromString(sanitized, 'text/html');
+    const embed = document.querySelector('.note-embed');
+    expect(embed?.parentElement?.tagName).not.toBe('P');
+    expect(embed?.parentElement?.tagName).not.toBe('A');
+  });
+
+  it('リスト項目内の埋め込みは DOMPurify 後もリストを壊さない', async () => {
+    const { renderNoteMarkdown } = await import('@/infra/render/render');
+    const result = await renderNoteMarkdown('- 前\n- ![[child]]\n- 後', {
+      path: 'root.md',
+      contents: new Map([
+        ['root.md', '- 前\n- ![[child]]\n- 後'],
+        ['child.md', '子の本文'],
+      ]),
+      filePaths: ['root.md', 'child.md'],
+      imageUrl: (p) => `/api/raw/o/r/${encodeURIComponent(p)}`,
+      linkHref: (p, sub) => `/octocat/notes/blob/${p}${sub !== null ? `#${sub}` : ''}`,
+    });
+    const sanitized = sanitizeHtml(result.html);
+    expect(sanitized).toContain('<div class="note-embed"');
+    expect(sanitized).not.toContain('<p><div');
+    expect(sanitized).not.toContain('</div></p>');
+  });
+
+  it('文書先頭の埋め込みは DOMPurify 後も最初の要素に保たれる', async () => {
+    const { renderNoteMarkdown } = await import('@/infra/render/render');
+    const result = await renderNoteMarkdown('![[child]]\n\n後続の本文', {
+      path: 'root.md',
+      contents: new Map([
+        ['root.md', '![[child]]\n\n後続の本文'],
+        ['child.md', '子の本文'],
+      ]),
+      filePaths: ['root.md', 'child.md'],
+      imageUrl: (p) => `/api/raw/o/r/${encodeURIComponent(p)}`,
+      linkHref: (p, sub) => `/octocat/notes/blob/${p}${sub !== null ? `#${sub}` : ''}`,
+    });
+    const sanitized = sanitizeHtml(result.html);
+    expect(sanitized.trim().startsWith('<div class="note-embed"')).toBe(true);
   });
 });
