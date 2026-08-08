@@ -304,11 +304,14 @@ const server = createServer(async (req, res) => {
     const content = Buffer.from(body.content, 'base64').toString('utf8');
     const sha = `sha-saved-${++MOCK_SHA_COUNTER}`;
     NOTES[key] = { sha, content };
+    // GitHub Contents API の PUT 応答形式（content オブジェクトを返す）に合わせる
     sendJson(res, 200, {
-      type: 'file',
-      encoding: 'base64',
-      content: body.content,
-      sha,
+      content: {
+        type: 'file',
+        encoding: 'base64',
+        content: body.content,
+        sha,
+      },
     });
     return;
   }

@@ -17,6 +17,9 @@ import type { SessionGateway } from '@/application/session';
 import type { VaultGateway } from '@/application/vault';
 import { createEditorView as createEditorViewImpl } from '@/infra/editor/editor';
 import type { EditorHandle } from '@/infra/editor/editor';
+
+/** CM6 エディタの opaque ハンドル型（UI 層は infra を import できないためここで公開） */
+export type { EditorHandle } from '@/infra/editor/editor';
 import { SessionGatewayLive } from '@/infra/auth/session-gateway';
 import { NoteGatewayLive, VaultGatewayLive } from '@/infra/github/http-gateway';
 import { DraftStoreLive } from '@/infra/storage/draft-store';

@@ -36,6 +36,16 @@ function readString(value: unknown): string | null {
 /** プロキシ系エラーの kind（Vault / ノート取得で共通の文字列合併型） */
 type FetchErrorKind = 'unauthenticated' | 'rate_limited' | 'not_found' | 'server' | 'network';
 
+/** UTF-8 文字列を base64（btoa 互換）にエンコードする（PUT の content 用） */
+function encodeBase64Content(content: string): string {
+  const bytes = new TextEncoder().encode(content);
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
 /** kind を持つ Error 派生クラスのコンストラクタ（VaultFetchError / NoteFetchError） */
 interface FetchErrorConstructor<E extends Error> {
   new (kind: FetchErrorKind, message: string, options?: { cause?: unknown }): E;
@@ -255,9 +265,10 @@ export const NoteGatewayLive = Layer.succeed(NoteGateway, {
   saveNote: (ref: VaultRef, notePath: string, request: NoteSaveRequest) =>
     Effect.gen(function* () {
       const path = `/api/notes/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/blob/${encodeURIComponent(notePath)}`;
-      // sha が null の新規作成は JSON からキーごと落とす（プロキシが Create として扱う）
+      // sha が null の新規作成は JSON からキーごと落とす（プロキシが Create として扱う）。
+      // content はプロキシ（functions/api/notes）の規約に合わせて base64 で渡す
       const body = yield* requestSave(path, {
-        content: request.content,
+        content: encodeBase64Content(request.content),
         message: request.message,
         ...(request.sha === null ? {} : { sha: request.sha }),
       });

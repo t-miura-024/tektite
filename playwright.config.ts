@@ -27,7 +27,9 @@ const e2eAuthBindings = [
 
 export default defineConfig({
   testDir,
-  fullyParallel: true,
+  // save.feature のシナリオはモックサーバー（features/support/mock-github-server.mjs）の
+  // 保存状態を共有・変更するため、ファイル内は定義順に直列実行する。
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],

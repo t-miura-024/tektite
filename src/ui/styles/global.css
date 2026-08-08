@@ -422,3 +422,110 @@ body {
 .note-editor .cm-editor.cm-focused {
   outline: none;
 }
+
+/* 保存状態表示と保存ボタン（M3: 明示保存） */
+.save-status {
+  margin-inline-start: auto;
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.save-status[data-status='dirty'] {
+  color: var(--color-accent);
+}
+
+.save-status[data-status='saving'] {
+  color: var(--color-fg-muted);
+}
+
+.save-status[data-status='conflict'] {
+  color: var(--color-danger);
+}
+
+.note-save-button {
+  flex: none;
+}
+
+/* Draft 復元通知（M3: リロード・誤クローズからの復元） */
+.draft-restore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-bg-subtle);
+}
+
+.draft-restore-message {
+  margin: 0;
+}
+
+.draft-restore-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* 競合パネル（M3: 差分表示 + 上書き/取り込みの 2 択。自動マージなし） */
+.conflict-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-md);
+  overflow: auto;
+}
+
+.conflict-panel-title {
+  margin: 0;
+}
+
+.conflict-panel-note {
+  margin: var(--space-xs) 0 0;
+  color: var(--color-fg-muted);
+}
+
+.conflict-panes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-md);
+  margin-block-start: var(--space-md);
+}
+
+@media (min-width: 48rem) {
+  .conflict-panes {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.conflict-pane {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.conflict-pane-title {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background-color: var(--color-bg-subtle);
+  font-size: 0.875rem;
+}
+
+.conflict-content {
+  margin: 0;
+  padding: var(--space-md);
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.conflict-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-block-start: var(--space-md);
+  flex-wrap: wrap;
+}

@@ -13,13 +13,29 @@
 
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
+import type { Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 
 import { markdownDecoration, markdownDecorationTheme } from '@/infra/editor/markdown-decoration';
 
-/** 生成したエディタの不透明なハンドル（UI 層は CM6 の型を知らない） */
+/**
+ * 生成したエディタの不透明なハンドル（UI 層は CM6 の型を知らない）。
+ * 本文の読み書きとイベント購読（自動保存・未保存判定用）を提供する。
+ */
 export interface EditorHandle {
   readonly destroy: () => void;
+  /** 現在の本文を取得する */
+  readonly getContent: () => string;
+  /** 本文を置き換える（同一内容のときは何もしない。Draft 復元・競合解決用） */
+  readonly setContent: (content: string) => void;
+  /**
+   * フォーカス喪失の通知を購読する。エディタ外へのフォーカス移動・ウィンドウ
+   * blur・エディタ破棄を問わない「エディタからのフォーカス喪失すべて」が
+   * 単一ルールで通知される（自動保存のトリガー）。
+   */
+  readonly onBlur: (callback: () => void) => void;
+  /** 本文変更の通知を購読する（未保存判定と Draft 退避のトリガー） */
+  readonly onChange: (callback: (content: string) => void) => void;
 }
 
 /** システム / アプリ設定のダークモード判定（CM6 のテーマ配色選択用） */
@@ -81,7 +97,10 @@ const editorTheme = (dark: boolean) =>
   );
 
 /** エディタ状態を組み立てる（DOM に依存しない純粋関数。テスト用に分離） */
-export function buildEditorState(doc: string): EditorState {
+export function buildEditorState(
+  doc: string,
+  extraExtensions: readonly Extension[] = [],
+): EditorState {
   return EditorState.create({
     doc,
     extensions: [
@@ -92,14 +111,57 @@ export function buildEditorState(doc: string): EditorState {
       lineNumbers(),
       EditorView.lineWrapping,
       editorTheme(isDarkMode()),
+      ...extraExtensions,
     ],
   });
 }
 
 /** 親要素に CM6 エディタを生成する（破棄はハンドル経由） */
 export function createEditorView(parent: HTMLElement, doc: string): EditorHandle {
-  const view = new EditorView({ state: buildEditorState(doc), parent });
+  const blurCallbacks = new Set<() => void>();
+  const changeCallbacks = new Set<(content: string) => void>();
+
+  const view = new EditorView({
+    state: buildEditorState(doc, [
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          const content = update.state.doc.toString();
+          for (const callback of changeCallbacks) {
+            callback(content);
+          }
+        }
+      }),
+    ]),
+    parent,
+  });
+
+  // フォーカス喪失の検知。blur はバブルしないため focusout（バブルする）を使う。
+  // エディタ内でのフォーカス移動（将来の focusable な widget 等）は喪失とみなさない。
+  view.dom.addEventListener('focusout', (event) => {
+    const related = event.relatedTarget;
+    if (related instanceof Node && view.dom.contains(related)) {
+      return;
+    }
+    for (const callback of blurCallbacks) {
+      callback();
+    }
+  });
+
   return {
     destroy: () => view.destroy(),
+    getContent: () => view.state.doc.toString(),
+    setContent: (content: string) => {
+      const current = view.state.doc.toString();
+      if (current === content) {
+        return;
+      }
+      view.dispatch({ changes: { from: 0, to: current.length, insert: content } });
+    },
+    onBlur: (callback) => {
+      blurCallbacks.add(callback);
+    },
+    onChange: (callback) => {
+      changeCallbacks.add(callback);
+    },
   };
 }
