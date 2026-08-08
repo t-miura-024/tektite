@@ -7,8 +7,9 @@
  * （src/infra/editor/markdown-decoration.ts）が担う。
  *
  * 意図的に「過剰に完全」にはしない: ネストした強調・行をまたぐインライン
- * 要素・複雑な URL（タイトル付き等）は装飾対象外（Obsidian 記法の完全対応は
- * 次計画 M3 の責務）。装飾は重ならず、出力は常に from 昇順になる
+ * 要素・複雑な URL（タイトル付き等）は装飾対象外。Obsidian 記法
+ * （WikiLink / Embed / Tag / Frontmatter）は src/domain/notation が担う。
+ * 装飾は重ならず、出力は常に from 昇順になる
  * （CM6 の RangeSetBuilder が from 昇順を要求するため）。
  */
 
