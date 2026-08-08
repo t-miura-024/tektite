@@ -47,12 +47,17 @@ export async function verifyOAuthState(
   signature: string,
 ): Promise<boolean> {
   const signatureBytes = base64UrlDecode(signature);
-  if (!signatureBytes || signatureBytes.byteLength === 0 || state.length === 0) {
+  if (!signatureBytes.ok || signatureBytes.value.byteLength === 0 || state.length === 0) {
     return false;
   }
   try {
     const key = await importHmacKey(secret, ['verify']);
-    return await crypto.subtle.verify('HMAC', key, signatureBytes, new TextEncoder().encode(state));
+    return await crypto.subtle.verify(
+      'HMAC',
+      key,
+      signatureBytes.value,
+      new TextEncoder().encode(state),
+    );
   } catch {
     return false;
   }

@@ -6,6 +6,9 @@
  * プラットフォーム固有 API（Buffer など）には依存しない。
  */
 
+import { err, ok } from '@/domain/result';
+import type { Result } from '@/domain/result';
+
 export function base64UrlEncode(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) {
@@ -14,13 +17,18 @@ export function base64UrlEncode(bytes: Uint8Array): string {
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
+/** base64url デコードの失敗理由 */
+export type Base64UrlDecodeError = 'invalid_base64url';
+
 /**
- * base64url 文字列をデコードする。不正な入力の場合は null を返す。
+ * base64url 文字列をデコードする。不正な入力の場合は Err を返す。
  * WebCrypto（BufferSource）にそのまま渡せるよう ArrayBuffer 基底を明示する。
  */
-export function base64UrlDecode(input: string): Uint8Array<ArrayBuffer> | null {
+export function base64UrlDecode(
+  input: string,
+): Result<Uint8Array<ArrayBuffer>, Base64UrlDecodeError> {
   if (!/^[A-Za-z0-9_-]*$/.test(input)) {
-    return null;
+    return err('invalid_base64url');
   }
   const base64 = input.replaceAll('-', '+').replaceAll('_', '/');
   const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
@@ -30,8 +38,8 @@ export function base64UrlDecode(input: string): Uint8Array<ArrayBuffer> | null {
     for (let index = 0; index < binary.length; index += 1) {
       bytes[index] = binary.charCodeAt(index);
     }
-    return bytes;
+    return ok(bytes);
   } catch {
-    return null;
+    return err('invalid_base64url');
   }
 }

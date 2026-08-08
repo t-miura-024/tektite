@@ -53,10 +53,13 @@ export async function readAccessToken(
 ): Promise<string | null> {
   const cookies = parseCookies(request.headers.get('Cookie'));
   const payload = cookies[SESSION_COOKIE_NAME];
-  if (!payload) {
+  if (!payload || !payload.ok) {
+    // Cookie 欠落・不正な値は未ログインとして扱う
     return null;
   }
-  return decryptSecretPayload(sessionSecret, payload);
+  const token = await decryptSecretPayload(sessionSecret, payload.value);
+  // 復号失敗（鍵不一致・改ざん）も未ログインとして扱う
+  return token.ok ? token.value : null;
 }
 
 export function clearSessionCookie(): string {
@@ -83,15 +86,15 @@ export async function verifyStateCookie(
 ): Promise<boolean> {
   const cookies = parseCookies(request.headers.get('Cookie'));
   const value = cookies[OAUTH_STATE_COOKIE_NAME];
-  if (!value) {
+  if (!value || !value.ok) {
     return false;
   }
-  const separatorIndex = value.lastIndexOf('.');
-  if (separatorIndex <= 0 || separatorIndex === value.length - 1) {
+  const separatorIndex = value.value.lastIndexOf('.');
+  if (separatorIndex <= 0 || separatorIndex === value.value.length - 1) {
     return false;
   }
-  const cookieState = value.slice(0, separatorIndex);
-  const signature = value.slice(separatorIndex + 1);
+  const cookieState = value.value.slice(0, separatorIndex);
+  const signature = value.value.slice(separatorIndex + 1);
   if (cookieState !== state) {
     return false;
   }
@@ -147,15 +150,15 @@ export async function verifyReturnToCookie(
 ): Promise<string> {
   const cookies = parseCookies(request.headers.get('Cookie'));
   const value = cookies[RETURN_TO_COOKIE_NAME];
-  if (!value) {
+  if (!value || !value.ok) {
     return '/';
   }
-  const separatorIndex = value.lastIndexOf('.');
-  if (separatorIndex <= 0 || separatorIndex === value.length - 1) {
+  const separatorIndex = value.value.lastIndexOf('.');
+  if (separatorIndex <= 0 || separatorIndex === value.value.length - 1) {
     return '/';
   }
-  const returnTo = value.slice(0, separatorIndex);
-  const signature = value.slice(separatorIndex + 1);
+  const returnTo = value.value.slice(0, separatorIndex);
+  const signature = value.value.slice(separatorIndex + 1);
   if (!isSafeReturnTo(returnTo)) {
     return '/';
   }

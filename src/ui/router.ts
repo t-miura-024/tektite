@@ -17,6 +17,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { err, ok } from '@/domain/result';
+import type { Result } from '@/domain/result';
 import { isValidGitHubName } from '@/domain/vault';
 import type { VaultRef } from '@/domain/vault';
 
@@ -29,21 +31,22 @@ export type Route =
 /** navigate() を通知するカスタムイベント名（popstate は SPA 内遷移では発火しないため） */
 export const NAVIGATE_EVENT_NAME = 'tektite:navigate';
 
-function safeDecode(segment: string): string | null {
+/** パスセグメントの URL デコード（不正なパーセントエスケープは Err） */
+function decodeSegment(segment: string): Result<string, 'invalid_percent_escape'> {
   try {
-    return decodeURIComponent(segment);
+    return ok(decodeURIComponent(segment));
   } catch {
-    return null;
+    return err('invalid_percent_escape');
   }
 }
 
 function parseVaultRef(ownerSegment: string, nameSegment: string): VaultRef | null {
-  const owner = safeDecode(ownerSegment);
-  const name = safeDecode(nameSegment);
-  if (!owner || !name || !isValidGitHubName(owner) || !isValidGitHubName(name)) {
+  const owner = decodeSegment(ownerSegment);
+  const name = decodeSegment(nameSegment);
+  if (!owner.ok || !name.ok || !isValidGitHubName(owner.value) || !isValidGitHubName(name.value)) {
     return null;
   }
-  return { owner, name };
+  return { owner: owner.value, name: name.value };
 }
 
 /** パス名を Route に解決する（純関数。window に依存しない） */
@@ -64,11 +67,11 @@ export function parseRoute(pathname: string): Route {
     }
     const pathParts: string[] = [];
     for (const segment of rest) {
-      const decoded = safeDecode(segment);
-      if (decoded === null || decoded.length === 0) {
+      const decoded = decodeSegment(segment);
+      if (!decoded.ok || decoded.value.length === 0) {
         return { kind: 'not-found' };
       }
-      pathParts.push(decoded);
+      pathParts.push(decoded.value);
     }
     return { kind: 'note', ref, notePath: pathParts.join('/') };
   }

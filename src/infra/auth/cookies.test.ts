@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { expireCookie, parseCookies, serializeCookie } from '@/infra/auth/cookies';
 
 describe('parseCookies', () => {
-  it('Cookie ヘッダーをキーと値の組にパースする', () => {
-    expect(parseCookies('a=1; b=2')).toEqual({ a: '1', b: '2' });
+  it('Cookie ヘッダーをキーと Result 値の組にパースする', () => {
+    expect(parseCookies('a=1; b=2')).toEqual({
+      a: { ok: true, value: '1' },
+      b: { ok: true, value: '2' },
+    });
   });
 
   it('URL エンコードされた値をデコードする', () => {
-    expect(parseCookies('state=abc%20def')).toEqual({ state: 'abc def' });
+    expect(parseCookies('state=abc%20def')).toEqual({ state: { ok: true, value: 'abc def' } });
   });
 
   it('空・null・不正な要素は無視する', () => {
@@ -18,14 +21,21 @@ describe('parseCookies', () => {
   });
 
   it('重複する名前は後の値を優先する', () => {
-    expect(parseCookies('a=1; a=2')).toEqual({ a: '2' });
+    expect(parseCookies('a=1; a=2')).toEqual({ a: { ok: true, value: '2' } });
   });
 
-  it('不正なパーセントエスケープを含む Cookie は無視して落ちない', () => {
+  it('不正なパーセントエスケープを含む Cookie は Err になり落ちない', () => {
     // %E0%A4%A は途中切れの UTF-8 パーセントエスケープ（decodeURIComponent が URIError を投げる）
-    expect(parseCookies('bad=%E0%A4%A; ok=1')).toEqual({ ok: '1' });
-    expect(parseCookies('broken=%ZZ')).toEqual({});
-    expect(parseCookies('a=%E6%97%A5; bad=%E0%A4%A')).toEqual({ a: '日' });
+    const mixed = parseCookies('bad=%E0%A4%A; ok=1');
+    expect(mixed['bad']).toEqual({ ok: false, error: 'invalid_percent_escape' });
+    expect(mixed['ok']).toEqual({ ok: true, value: '1' });
+    expect(parseCookies('broken=%ZZ')['broken']).toEqual({
+      ok: false,
+      error: 'invalid_percent_escape',
+    });
+    const japanese = parseCookies('a=%E6%97%A5; bad=%E0%A4%A');
+    expect(japanese['a']).toEqual({ ok: true, value: '日' });
+    expect(japanese['bad']).toEqual({ ok: false, error: 'invalid_percent_escape' });
   });
 });
 

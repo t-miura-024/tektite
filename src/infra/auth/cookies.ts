@@ -5,6 +5,9 @@
  * フレームワークや Cookie ライブラリに依存しない最小実装を置く。
  */
 
+import { err, ok } from '@/domain/result';
+import type { Result } from '@/domain/result';
+
 export type SameSite = 'Strict' | 'Lax' | 'None';
 
 export interface CookieOptions {
@@ -19,11 +22,17 @@ export interface CookieOptions {
 
 /**
  * Cookie ヘッダー文字列をパースする。重複時は後の値を優先する。
- * 不正なパーセントエスケープを含む Cookie は無視する（URIError で認証
- * エンドポイントが 500 になるのを防ぐため、該当 Cookie だけ null 扱いにする）。
+ * 各 Cookie の値は Result で返す: 不正なパーセントエスケープを含む値は
+ * Err（invalid_percent_escape）になる（decodeURIComponent の URIError で
+ * 認証エンドポイントが 500 になるのを防ぐため。欠落扱いにするかどうかは
+ * 呼び出し側が Result を見て決める）。
  */
-export function parseCookies(header: string | null | undefined): Record<string, string> {
-  const cookies: Record<string, string> = {};
+export type CookieDecodeError = 'invalid_percent_escape';
+
+export function parseCookies(
+  header: string | null | undefined,
+): Record<string, Result<string, CookieDecodeError>> {
+  const cookies: Record<string, Result<string, CookieDecodeError>> = {};
   if (!header) {
     return cookies;
   }
@@ -38,11 +47,11 @@ export function parseCookies(header: string | null | undefined): Record<string, 
       continue;
     }
     try {
-      cookies[name] = decodeURIComponent(value);
+      cookies[name] = ok(decodeURIComponent(value));
     } catch {
       // 不正なパーセントエスケープ（例: "%ZZ"、途中切れの UTF-8 列）は
-      // その Cookie を存在しなかったものとして扱う
-      continue;
+      // Err として記録する。無視（欠落扱い）するかどうかは呼び出し側の判断。
+      cookies[name] = err('invalid_percent_escape');
     }
   }
   return cookies;

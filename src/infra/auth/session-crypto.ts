@@ -14,6 +14,8 @@
  */
 
 import { base64UrlDecode, base64UrlEncode } from '@/infra/auth/base64url';
+import { err, ok } from '@/domain/result';
+import type { Result } from '@/domain/result';
 
 const PAYLOAD_VERSION = 'v1';
 const IV_BYTES = 12;
@@ -39,31 +41,46 @@ export async function encryptSecretPayload(secret: string, plaintext: string): P
 }
 
 /**
- * 暗号化ペイロードを復号する。形式不正・鍵不一致・改ざんの場合は null を返す。
+ * 復号の失敗理由: ペイロード形式・鍵・改ざんのどの段階で失敗したか。
+ * - invalid_format: 形式不正（バージョン不一致・iv/暗号文の欠落・base64url 不正・長さ不正）
+ * - decrypt_failed: 鍵不一致・改ざん（AES-GCM の認証タグ検証失敗）
+ */
+export type SessionDecryptError = 'invalid_format' | 'decrypt_failed';
+
+/**
+ * 暗号化ペイロードを復号する。成功時は平文、失敗時は失敗理由を Result で返す。
+ * 呼び出し側は Err を「トークンなし」として扱う（未ログインと区別しない）。
  */
 export async function decryptSecretPayload(
   secret: string,
   payload: string,
-): Promise<string | null> {
+): Promise<Result<string, SessionDecryptError>> {
   const parts = payload.split('.');
   if (parts.length !== 3 || parts[0] !== PAYLOAD_VERSION) {
-    return null;
+    return err('invalid_format');
   }
   const ivPart = parts[1];
   const ciphertextPart = parts[2];
   if (!ivPart || !ciphertextPart) {
-    return null;
+    return err('invalid_format');
   }
   const iv = base64UrlDecode(ivPart);
   const ciphertext = base64UrlDecode(ciphertextPart);
-  if (!iv || iv.byteLength !== IV_BYTES || !ciphertext || ciphertext.byteLength === 0) {
-    return null;
+  if (!iv.ok || !ciphertext.ok) {
+    return err('invalid_format');
+  }
+  if (iv.value.byteLength !== IV_BYTES || ciphertext.value.byteLength === 0) {
+    return err('invalid_format');
   }
   try {
     const key = await deriveAesGcmKey(secret);
-    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-    return new TextDecoder().decode(plaintext);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv.value },
+      key,
+      ciphertext.value,
+    );
+    return ok(new TextDecoder().decode(plaintext));
   } catch {
-    return null;
+    return err('decrypt_failed');
   }
 }
