@@ -13,16 +13,21 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { openNote } from '@/application/note';
 import { openVault } from '@/application/vault';
 import { run } from '@/composition';
+import { buildNotationIndex } from '@/domain/notation/index';
+import type { VaultNotationIndex } from '@/domain/notation/index';
 import type { TreeDirectory, VaultTree } from '@/domain/tree';
 import { ancestorDirectoryPaths } from '@/domain/tree';
 import type { VaultRef } from '@/domain/vault';
 import { vaultRefFullName } from '@/domain/vault';
 
+import { BacklinkPanel } from '@/ui/components/BacklinkPanel';
 import { FileTree } from '@/ui/components/FileTree';
 import { Link } from '@/ui/components/Link';
 import { NotePane } from '@/ui/components/NotePane';
+import { TagPanel } from '@/ui/components/TagPanel';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError, vaultErrorMessage } from '@/ui/vault-error';
 
@@ -58,6 +63,12 @@ type TreeState =
 export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: VaultScreenProps) {
   const [state, setState] = useState<TreeState>({ kind: 'loading' });
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set(['']));
+  /**
+   * 記法索引（バックリンク / タグ一覧用）。ツリー取得後に全 Markdown ノートの
+   * 本文を取得して構築する。編集保存後の最新状態を反映するため、ノート切替時
+   * （notePath 変更）にも再構築する（MVP: Vault が小さい前提で全件取得）
+   */
+  const [notation, setNotation] = useState<VaultNotationIndex | null>(null);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -80,9 +91,50 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     }
   }, [owner, name, notify, onSessionExpired]);
 
+  /**
+   * ツリーから記法索引を構築する。取得できないノート（404 等）は索引から
+   * 欠落させる（バックリンク / タグ表示が不完全になるだけで画面は継続する）。
+   */
+  const loadNotationIndex = useCallback(
+    async (tree: VaultTree): Promise<VaultNotationIndex> => {
+      const filePaths = collectFilePaths(tree.root);
+      const contents = new Map<string, string>();
+      const notePaths = filePaths.filter((path) => path.endsWith('.md'));
+      await Promise.all(
+        notePaths.map(async (path) => {
+          try {
+            const note = await run(openNote({ owner, name }, path));
+            contents.set(path, note.content);
+          } catch {
+            // 個別ノートの取得失敗は索引から欠落させる
+          }
+        }),
+      );
+      return buildNotationIndex({ filePaths, contents });
+    },
+    [owner, name],
+  );
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  // ツリー取得後・ノート切替時に記法索引を再構築する（ノート切替時は保存後の
+  // 最新状態を反映するため）
+  useEffect(() => {
+    if (state.kind !== 'ready') {
+      return;
+    }
+    let cancelled = false;
+    void loadNotationIndex(state.tree).then((index) => {
+      if (!cancelled) {
+        setNotation(index);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state, notePath, loadNotationIndex]);
 
   // Vault が変わったら展開状態をリセットする
   useEffect(() => {
@@ -163,6 +215,18 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
               onToggleDirectory={toggleDirectory}
             />
           </>
+        )}
+        {notation !== null && (
+          <section className="vault-sidebar-section" aria-label="タグ一覧">
+            <h3 className="vault-sidebar-section-title">タグ</h3>
+            <TagPanel vaultRef={vaultRef} tagIndex={notation.tagIndex} notes={notation.notes} />
+          </section>
+        )}
+        {notation !== null && notePath !== null && (
+          <section className="vault-sidebar-section" aria-label="バックリンク">
+            <h3 className="vault-sidebar-section-title">バックリンク</h3>
+            <BacklinkPanel vaultRef={vaultRef} links={notation.backlinks.get(notePath) ?? []} />
+          </section>
         )}
       </aside>
       <section className="vault-content">

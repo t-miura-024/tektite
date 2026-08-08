@@ -906,3 +906,106 @@ body {
   margin-block-start: var(--space-md);
   flex-wrap: wrap;
 }
+
+/* サイドバーのセクション（M3: タグ一覧 / バックリンク） */
+.vault-sidebar-section {
+  margin-block-start: var(--space-md);
+}
+
+.vault-sidebar-section-title {
+  margin: 0 0 var(--space-xs);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-fg-muted);
+}
+
+/* タグ一覧（タグを選ぶとノート一覧が展開される） */
+.tag-list,
+.tag-list-notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-list-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  border: none;
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.tag-list-toggle:hover {
+  background-color: var(--color-bg-subtle);
+}
+
+.tag-list-caret {
+  flex: none;
+  color: var(--color-fg-muted);
+}
+
+.tag-list-name {
+  color: var(--color-accent);
+}
+
+.tag-list-note-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: var(--space-xs) var(--space-sm);
+  padding-inline-start: calc(var(--space-sm) + var(--space-md));
+  border-radius: var(--radius-md);
+  color: inherit;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.tag-list-note-link:hover {
+  background-color: var(--color-bg-subtle);
+  color: var(--color-accent);
+}
+
+.tag-list-note-path,
+.backlink-path {
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.tag-list-empty,
+.backlink-empty {
+  margin: 0;
+  color: var(--color-fg-muted);
+  font-size: 0.8125rem;
+}
+
+/* バックリンク一覧 */
+.backlink-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backlink-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  color: inherit;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.backlink-link:hover {
+  background-color: var(--color-bg-subtle);
+  color: var(--color-accent);
+}

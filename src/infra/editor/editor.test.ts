@@ -21,4 +21,10 @@ describe('CM6 エディタセットアップ（状態生成）', () => {
     // markdownDecoration の provide により decorations facet に 1 つ供給される
     expect(state.facet(EditorView.decorations)).toHaveLength(1);
   });
+
+  it('filePaths を渡すと記法装飾（WikiLink / Embed / Tag）が組み込まれる', () => {
+    const state = buildEditorState('[[a]] #タグ', [], { filePaths: ['a.md'] });
+    // markdownDecoration + notationDecoration の 2 つが供給される
+    expect(state.facet(EditorView.decorations)).toHaveLength(2);
+  });
 });

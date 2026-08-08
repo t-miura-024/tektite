@@ -17,6 +17,23 @@ import type { Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 
 import { markdownDecoration, markdownDecorationTheme } from '@/infra/editor/markdown-decoration';
+import {
+  notationDecoration,
+  notationDecorationTheme,
+  resolveWikilinkAt,
+} from '@/infra/editor/notation-decoration';
+
+/**
+ * エディタ生成時のオプション（M3 の記法装飾・WikiLink クリック遷移用）。
+ * filePaths は Vault 内の全ファイルパスで、WikiLink / Embed / Tag の解決に使う。
+ * onWikilinkClick は解決済みのリンク先（パス + 見出し）を通知するコールバック。
+ */
+export interface EditorOptions {
+  /** Vault 内の全ファイルパス（未指定なら記法装飾を組み込まない） */
+  readonly filePaths?: readonly string[];
+  /** WikiLink クリック時の遷移コールバック（ターゲットが解決できた場合のみ） */
+  readonly onWikilinkClick?: (path: string, subpath: string | null) => void;
+}
 
 /**
  * 生成したエディタの不透明なハンドル（UI 層は CM6 の型を知らない）。
@@ -100,6 +117,7 @@ const editorTheme = (dark: boolean) =>
 export function buildEditorState(
   doc: string,
   extraExtensions: readonly Extension[] = [],
+  options: EditorOptions = {},
 ): EditorState {
   return EditorState.create({
     doc,
@@ -108,6 +126,14 @@ export function buildEditorState(
       keymap.of([...defaultKeymap, ...historyKeymap]),
       markdownDecoration,
       markdownDecorationTheme,
+      // 記法装飾（WikiLink / Embed / Tag）は filePaths があれば組み込む
+      ...(options.filePaths !== undefined
+        ? [notationDecoration(options.filePaths), notationDecorationTheme]
+        : []),
+      // WikiLink クリック遷移（filePaths とコールバックの両方が揃ったときのみ）
+      ...(options.filePaths !== undefined && options.onWikilinkClick !== undefined
+        ? [wikilinkClickExtension(options)]
+        : []),
       lineNumbers(),
       EditorView.lineWrapping,
       editorTheme(isDarkMode()),
@@ -116,22 +142,65 @@ export function buildEditorState(
   });
 }
 
+/**
+ * WikiLink クリックの検知 extension。
+ * 修飾キーなしの左クリックで、クリック位置が解決可能な WikiLink 内にあれば
+ * onWikilinkClick を呼ぶ（mousedown と同位置のクリックのみ。ドラッグ選択は除外）。
+ * 修飾キー付きクリックは何もしない（エディタのカーソル配置を許可する）。
+ */
+function wikilinkClickExtension(options: EditorOptions): Extension {
+  let downPos: number | null = null;
+  return EditorView.domEventHandlers({
+    mousedown(event, view) {
+      downPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    },
+    click(event, view) {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos === null || pos !== downPos) {
+        return;
+      }
+      const filePaths = options.filePaths;
+      const onNavigate = options.onWikilinkClick;
+      if (!filePaths || !onNavigate) {
+        return;
+      }
+      const resolved = resolveWikilinkAt(view.state.doc.toString(), pos, filePaths);
+      if (resolved === null) {
+        return;
+      }
+      event.preventDefault();
+      onNavigate(resolved.path, resolved.subpath);
+    },
+  });
+}
+
 /** 親要素に CM6 エディタを生成する（破棄はハンドル経由） */
-export function createEditorView(parent: HTMLElement, doc: string): EditorHandle {
+export function createEditorView(
+  parent: HTMLElement,
+  doc: string,
+  options: EditorOptions = {},
+): EditorHandle {
   const blurCallbacks = new Set<() => void>();
   const changeCallbacks = new Set<(content: string) => void>();
 
   const view = new EditorView({
-    state: buildEditorState(doc, [
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-          const content = update.state.doc.toString();
-          for (const callback of changeCallbacks) {
-            callback(content);
+    state: buildEditorState(
+      doc,
+      [
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            const content = update.state.doc.toString();
+            for (const callback of changeCallbacks) {
+              callback(content);
+            }
           }
-        }
-      }),
-    ]),
+        }),
+      ],
+      options,
+    ),
     parent,
   });
 

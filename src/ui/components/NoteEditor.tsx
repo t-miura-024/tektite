@@ -24,6 +24,10 @@ export interface NoteEditorProps {
   notePath: string;
   /** エディタに初期表示するノート本文 */
   initialContent: string;
+  /** Vault 内の全ファイルパス（WikiLink / Embed / Tag 装飾とクリック遷移に使う） */
+  filePaths?: readonly string[];
+  /** WikiLink クリック時の遷移コールバック（解決済みパス + 見出し。null は見出しなし） */
+  onWikilinkClick?: (path: string, subpath: string | null) => void;
   /** 本文が変わるたびに呼ばれる（未保存判定・Draft 退避のトリガー） */
   onContentChange?: (content: string) => void;
   /** エディタからのフォーカス喪失（自動保存のトリガー） */
@@ -35,6 +39,8 @@ export interface NoteEditorProps {
 export function NoteEditor({
   notePath,
   initialContent,
+  filePaths,
+  onWikilinkClick,
   onContentChange,
   onBlur,
   onReady,
@@ -42,8 +48,8 @@ export function NoteEditor({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // コールバックは ref で常に最新を参照する（エディタの再生成を避ける）
-  const callbacksRef = useRef({ onContentChange, onBlur });
-  callbacksRef.current = { onContentChange, onBlur };
+  const callbacksRef = useRef({ onContentChange, onBlur, onWikilinkClick });
+  callbacksRef.current = { onContentChange, onBlur, onWikilinkClick };
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
 
@@ -52,7 +58,10 @@ export function NoteEditor({
     if (!container) {
       return;
     }
-    const handle = createEditorView(container, initialContent);
+    const handle = createEditorView(container, initialContent, {
+      filePaths,
+      onWikilinkClick: (path, subpath) => callbacksRef.current.onWikilinkClick?.(path, subpath),
+    });
     handle.onChange((content) => callbacksRef.current.onContentChange?.(content));
     handle.onBlur(() => callbacksRef.current.onBlur?.());
     onReadyRef.current?.(handle);
@@ -60,7 +69,7 @@ export function NoteEditor({
       handle.destroy();
       onReadyRef.current?.(null);
     };
-  }, [initialContent]);
+  }, [initialContent, filePaths]);
 
   return (
     <div

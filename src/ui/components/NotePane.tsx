@@ -26,12 +26,14 @@ import { NoteSaveError, openNote, saveNoteContent } from '@/application/note';
 import type { NoteContent } from '@/application/note';
 import { run } from '@/composition';
 import type { EditorHandle } from '@/composition';
+import { slugify } from '@/composition';
 import type { VaultRef } from '@/domain/vault';
 
 import { ConflictPanel } from '@/ui/components/ConflictPanel';
 import { NoteEditor } from '@/ui/components/NoteEditor';
 import { ReadingView } from '@/ui/components/ReadingView';
 import { noteErrorMessage, noteSaveErrorMessage } from '@/ui/note-error';
+import { navigate, noteRoutePath } from '@/ui/router';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError } from '@/ui/vault-error';
 
@@ -121,6 +123,17 @@ export function NotePane({
   const handleEditorReady = useCallback((handle: EditorHandle | null) => {
     handleRef.current = handle;
   }, []);
+
+  /**
+   * エディタ内の WikiLink クリック: SPA 内遷移（リーディング表示と同様の
+   * URL 規則。`#見出し` はスラグ化して付与する）
+   */
+  const handleWikilinkClick = useCallback(
+    (path: string, subpath: string | null) => {
+      navigate(`${noteRoutePath(vaultRef, path)}${subpath !== null ? `#${slugify(subpath)}` : ''}`);
+    },
+    [vaultRef],
+  );
 
   const handleContentChange = useCallback(
     (content: string) => {
@@ -471,6 +484,8 @@ export function NotePane({
             key={notePath}
             notePath={notePath}
             initialContent={editorContent}
+            filePaths={filePaths}
+            onWikilinkClick={handleWikilinkClick}
             onContentChange={handleContentChange}
             onBlur={handleEditorBlur}
             onReady={handleEditorReady}

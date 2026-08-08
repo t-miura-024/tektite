@@ -107,14 +107,21 @@ const TREES = {
     { path: 'daily/2026-08-07.md', type: 'blob' },
     { path: 'daily/2026-08-08.md', type: 'blob' },
     { path: 'decoration.md', type: 'blob' },
+    { path: 'embeds.md', type: 'blob' },
     { path: 'projects', type: 'tree' },
     { path: 'projects/tektite.md', type: 'blob' },
+    { path: 'tags.md', type: 'blob' },
+    { path: 'wiki.md', type: 'blob' },
   ],
   'octocat/private-vault:main': [
     { path: 'README.md', type: 'blob' },
     { path: 'secrets.md', type: 'blob' },
   ],
 };
+
+/** 1x1 透明 PNG（画像 Embed の表示検証用） */
+const TINY_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 /** Contents API 想定のノート本文と sha（キーは "owner/repo:path"） */
 const NOTES = {
@@ -138,6 +145,29 @@ const NOTES = {
     sha: 'sha-decoration',
     content:
       '# 装飾サンプル\n\n**太字テキスト** と *斜体テキスト* と `コード`\n\n- 箇条書き\n1. 番号付きリスト\n\n> 引用文\n\n- [ ] 未完了タスク\n- [x] 完了タスク\n',
+  },
+  // 記法の E2E（features/notation.feature）用。保存系シナリオが書き換える
+  // projects/tektite.md には依存させず、シナリオ間の独立性を保つ
+  'octocat/notes:wiki.md': {
+    sha: 'sha-wiki',
+    content:
+      '# Wiki\n\n[[tags]] と [[tags#セクション|タグの一覧]] を参照する。\n\n壊れリンク: [[存在しないノート]]\n\n#wiki\n',
+  },
+  'octocat/notes:tags.md': {
+    sha: 'sha-tags',
+    content:
+      '---\ntags:\n  - area/project\n---\n# タグのノート\n\n## セクション\n\nバックリンクとタグ一覧の検証用ノートです。\n\n#tagged\n',
+  },
+  'octocat/notes:embeds.md': {
+    sha: 'sha-embeds',
+    content: '# 埋め込み\n\n![[attachments/logo.png]]\n\n![[tags]]\n',
+  },
+  // 画像（raw 配信）。rawContent は GET /contents が Accept:
+  // application/vnd.github.raw のときバイナリとして返す
+  'octocat/notes:attachments/logo.png': {
+    sha: 'sha-logo',
+    contentType: 'image/png',
+    rawContent: TINY_PNG_BASE64,
   },
 };
 
@@ -271,6 +301,15 @@ const server = createServer(async (req, res) => {
     const note = NOTES[`${contentsMatch[1]}/${contentsMatch[2]}:${notePath}`];
     if (!note) {
       sendJson(res, 404, { message: 'Not Found' });
+      return;
+    }
+    // raw 配信（Accept: application/vnd.github.raw）はバイナリ本文を返す（画像 Embed 用）
+    if ((req.headers.accept ?? '').includes('application/vnd.github.raw')) {
+      const raw = note.rawContent
+        ? Buffer.from(note.rawContent, 'base64')
+        : Buffer.from(note.content, 'utf8');
+      res.writeHead(200, { 'Content-Type': note.contentType ?? 'application/octet-stream' });
+      res.end(raw);
       return;
     }
     sendJson(res, 200, {

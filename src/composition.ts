@@ -16,7 +16,7 @@ import { NoteGateway } from '@/application/note';
 import type { SessionGateway } from '@/application/session';
 import type { VaultGateway } from '@/application/vault';
 import { createEditorView as createEditorViewImpl } from '@/infra/editor/editor';
-import type { EditorHandle } from '@/infra/editor/editor';
+import type { EditorHandle, EditorOptions } from '@/infra/editor/editor';
 import { collectEmbedContents } from '@/infra/render/embed-contents';
 import type { EmbedContentFetcher } from '@/infra/render/embed-contents';
 import { renderNoteMarkdown } from '@/infra/render/render';
@@ -25,7 +25,7 @@ import { sanitizeHtml } from '@/infra/render/sanitize';
 import { slugify } from '@/infra/render/slug';
 
 /** CM6 エディタの opaque ハンドル型（UI 層は infra を import できないためここで公開） */
-export type { EditorHandle } from '@/infra/editor/editor';
+export type { EditorHandle, EditorOptions } from '@/infra/editor/editor';
 import { SessionGatewayLive } from '@/infra/auth/session-gateway';
 import { NoteGatewayLive, VaultGatewayLive } from '@/infra/github/http-gateway';
 import { DraftStoreLive } from '@/infra/storage/draft-store';
@@ -44,8 +44,11 @@ export type MainContext = SessionGateway | VaultGateway | NoteGateway | DraftSto
  * この組成ルートだけが infra を知るという既存規約に沿ってここで公開する。
  * UI は opaque な EditorHandle だけを扱い、CM6 の型には依存しない。
  */
-export const createEditorView: (parent: HTMLElement, doc: string) => EditorHandle =
-  createEditorViewImpl;
+export const createEditorView: (
+  parent: HTMLElement,
+  doc: string,
+  options?: EditorOptions,
+) => EditorHandle = createEditorViewImpl;
 
 /** リーディング表示のレンダリング API（UI 層は infra を import できないためここで公開） */
 export { collectEmbedContents, renderNoteMarkdown, sanitizeHtml, slugify };
