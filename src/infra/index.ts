@@ -9,4 +9,5 @@
  * 方針: GitHub API 呼び出しはすべて Pages Functions プロキシ経由に集約する。
  * ブラウザから api.github.com を直接呼ばない。
  */
-export {};
+
+export * from './auth';

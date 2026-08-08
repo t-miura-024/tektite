@@ -102,3 +102,120 @@ body {
 .app-placeholder {
   color: var(--color-fg-muted);
 }
+
+/* ボタン */
+.button-primary,
+.button-secondary {
+  display: inline-block;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-primary {
+  background-color: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+
+.button-primary:hover {
+  opacity: 0.9;
+}
+
+.button-secondary {
+  background-color: var(--color-bg-subtle);
+  color: var(--color-fg);
+  border-color: var(--color-border);
+}
+
+.button-secondary:hover {
+  background-color: var(--color-border);
+}
+
+.button-secondary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ログイン画面 */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-md);
+  margin-block-start: var(--space-lg);
+  padding: var(--space-lg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+  max-width: 32rem;
+}
+
+.login-tagline {
+  margin: 0;
+  color: var(--color-fg-muted);
+}
+
+/* セッション表示（ログイン済みヘッダー） */
+.session-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.session-login {
+  color: var(--color-fg-muted);
+  font-size: 0.875rem;
+}
+
+/* トースト（エラー UX: トースト表示 + リトライ導線） */
+.toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-block-end: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+  color: var(--color-fg);
+}
+
+.toast-message {
+  margin: 0;
+}
+
+.toast-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* エラーパネル（セッション確認失敗 + リトライ） */
+.error-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-md);
+  margin-block-start: var(--space-lg);
+  padding: var(--space-lg);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  max-width: 32rem;
+}
+
+.error-panel p {
+  margin: 0;
+}
