@@ -87,9 +87,9 @@ function decodeBase64Content(encoded: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** 標準 base64（btoa 出力相当）かどうか */
+/** 標準 base64（btoa 出力相当）かどうか。空文字（空ファイル）も許容する */
 function isValidBase64(value: string): boolean {
-  return value.length > 0 && value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
+  return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
 }
 
 /** PUT ボディ（sha は新規作成時は省略される） */
@@ -184,11 +184,11 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request, params })
     body.type !== 'file' ||
     body.encoding !== 'base64' ||
     typeof body.content !== 'string' ||
-    body.content.length === 0 ||
     typeof body.sha !== 'string' ||
     body.sha.length === 0
   ) {
-    // ディレクトリ指定・巨大ファイル（content なし）・形式不正はノートとして扱えない
+    // ディレクトリ指定・巨大ファイル（content なし）・形式不正はノートとして扱えない。
+    // 空ファイル（content: ''）は内容が空のノートとして許容する
     return Response.json({ error: 'github_error' }, { status: 502 });
   }
 

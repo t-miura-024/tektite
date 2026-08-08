@@ -47,6 +47,30 @@ Then(
   },
 );
 
+/** リモートに保存されていないことの検証（Draft 破棄時の blur 自動保存抑止確認用） */
+Then(
+  'リモートのノート {string} の内容は {string} を含まない',
+  async ({ page }, notePath: string, text: string) => {
+    const response = await page.request.get(
+      `/api/notes/octocat/notes/blob/${encodeNotePath(notePath)}`,
+    );
+    expect(response.ok()).toBeTruthy();
+    const body = (await response.json()) as { content?: unknown };
+    expect(typeof body.content).toBe('string');
+    expect(body.content as string).not.toContain(text);
+  },
+);
+
+/** 空ファイル（全内容削除）の保存結果を検証する */
+Then('リモートのノート {string} の内容は空である', async ({ page }, notePath: string) => {
+  const response = await page.request.get(
+    `/api/notes/octocat/notes/blob/${encodeNotePath(notePath)}`,
+  );
+  expect(response.ok()).toBeTruthy();
+  const body = (await response.json()) as { content?: unknown };
+  expect(body.content).toBe('');
+});
+
 /** モックサーバーの保存状態を直接書き換える（別クライアントによるリモート変更の再現） */
 When(
   'モックサーバーがノート {string} のリモート内容を {string} に変更する',
@@ -99,6 +123,18 @@ When('ユーザーが未保存の変更を復元する', async ({ page }) => {
 
 When('ユーザーが未保存の変更を破棄する', async ({ page }) => {
   await page.getByTestId('draft-discard-button').click();
+});
+
+/** エディタの全内容を選択して削除する（空ノート保存の検証用） */
+When('エディタの全内容を削除する', async ({ page }) => {
+  const content = page.getByTestId('note-editor').locator('.cm-content');
+  await content.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Delete');
+});
+
+Then('Draft 復元通知が表示されない', async ({ page }) => {
+  await expect(page.getByTestId('draft-restore')).toHaveCount(0);
 });
 
 Then('エディタにノート本文 {string} は表示されない', async ({ page }, text: string) => {

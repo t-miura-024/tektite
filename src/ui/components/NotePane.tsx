@@ -18,7 +18,7 @@
  * ユースケースの実行は組成ルート（src/composition）の run() 経由で行う。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { clearDraft, loadDraft, saveDraft } from '@/application/draft';
 import type { Draft } from '@/application/draft';
@@ -76,6 +76,12 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
   const readyRef = useRef(false);
   /** setContent（プログラム的な本文置換）中の onChange を無視するためのフラグ */
   const programmaticRef = useRef(false);
+  /**
+   * load ごとのノート世代。進行中だった旧ノートの保存完了が新しいノートの
+   * shaRef / dirty を上書きしないよう、保存結果の適用をこの世代でガードする
+   * （ノート切替と保存のレース対策）。
+   */
+  const generationRef = useRef(0);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   const { owner, name } = vaultRef;
@@ -152,15 +158,26 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
       }
       savingRef.current = true;
       setSaveStatus('saving');
+      const generation = generationRef.current;
       try {
         const result = await run(
           saveNoteContent({ owner, name }, notePath, { content, baseSha: shaRef.current }),
         );
+        if (generation !== generationRef.current) {
+          // 保存中にノートが切り替わった: 旧ノートの結果を新しいノートへ適用しない
+          return;
+        }
         shaRef.current = result.sha;
         await run(clearDraft({ owner, name }, notePath)).catch(() => {});
+        // 保存成功で復元通知を閉じる（失敗時は閉じない。失敗時は内容がまだ残っており
+        // 「復元」で誤って巻き戻るのを防ぐ）
+        setDraftNotice(null);
         savingRef.current = false;
         setDirty(false);
       } catch (error) {
+        if (generation !== generationRef.current) {
+          return;
+        }
         savingRef.current = false;
         if (isSessionExpiredError(error)) {
           notify('セッションの有効期限が切れました。ログインし直してください。');
@@ -190,11 +207,16 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
 
   /** 自動保存トリガー: エディタからのフォーカス喪失（単一ルール） */
   const handleEditorBlur = useCallback((): void => {
+    if (draftNotice !== null) {
+      // Draft 復元通知表示中の blur（「復元」「破棄」ボタンへのフォーカス移動を含む）では
+      // 自動保存しない。通知に対する明示操作（破棄/復元）と矛盾するため
+      return;
+    }
     if (!dirtyRef.current || savingRef.current || conflictRef.current || !readyRef.current) {
       return;
     }
     void performSave(contentRef.current);
-  }, [performSave]);
+  }, [performSave, draftNotice]);
 
   // Cmd+S / Ctrl+S ショートカット（エディタ内外を問わず有効）
   useEffect(() => {
@@ -215,6 +237,7 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
     }
     savingRef.current = true;
     setSaveStatus('saving');
+    const generation = generationRef.current;
     try {
       const result = await run(
         saveNoteContent({ owner, name }, notePath, {
@@ -222,8 +245,12 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
           baseSha: conflict.remote.sha,
         }),
       );
+      if (generation !== generationRef.current) {
+        return;
+      }
       shaRef.current = result.sha;
       await run(clearDraft({ owner, name }, notePath)).catch(() => {});
+      setDraftNotice(null);
       contentRef.current = conflict.local;
       conflictRef.current = false;
       setConflict(null);
@@ -231,6 +258,9 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
       savingRef.current = false;
       setDirty(false);
     } catch (error) {
+      if (generation !== generationRef.current) {
+        return;
+      }
       savingRef.current = false;
       if (isSessionExpiredError(error)) {
         notify('セッションの有効期限が切れました。ログインし直してください。');
@@ -252,9 +282,14 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
     if (!conflict) {
       return;
     }
+    const generation = generationRef.current;
     contentRef.current = conflict.remote.content;
     shaRef.current = conflict.remote.sha;
     await run(clearDraft({ owner, name }, notePath)).catch(() => {});
+    if (generation !== generationRef.current) {
+      // 取り込み中にノートが切り替わった: 旧ノートの状態を新しいノートへ適用しない
+      return;
+    }
     conflictRef.current = false;
     setConflict(null);
     setEditorContent(conflict.remote.content);
@@ -282,6 +317,9 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
   };
 
   const load = useCallback(async (): Promise<void> => {
+    // ノート切替レース対策: 世代を進める。進行中の旧ノート保存は完了時に世代が
+    // 一致しないため、shaRef / dirty などの状態を新しいノートへ適用しない
+    generationRef.current += 1;
     setLoadState({ kind: 'loading' });
     readyRef.current = false;
     savingRef.current = false;
@@ -315,7 +353,10 @@ export function NotePane({ vaultRef, notePath, notify, onSessionExpired }: NoteP
     }
   }, [owner, name, notePath, notify, onSessionExpired]);
 
-  useEffect(() => {
+  // ノート切替時に旧ノートの本文が 1 フレーム表示されるのを防ぐため、load() の
+  // loading 状態を paint 前に反映する（useEffect だと NoteEditor が key=notePath の
+  // 新インスタンスを旧 editorContent で一度マウントしてしまう）
+  useLayoutEffect(() => {
     void load();
   }, [load]);
 

@@ -141,6 +141,33 @@ describe('PUT /api/notes/:owner/:repo/blob/:path', () => {
     expect(sentBody.sha).toBeUndefined();
   });
 
+  it('空の content（空ファイル保存）も 400 にせず Contents API に転送する', async () => {
+    mocks.githubApiFetch.mockResolvedValue(
+      new Response(JSON.stringify({ content: { sha: 'sha-empty' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const response = await onRequestPut(
+      putContext(
+        putRequest({
+          content: '',
+          sha: 'sha-read',
+          message: 'Update 2026-08-08.md',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const sentBody = JSON.parse(String(mocks.githubApiFetch.mock.calls[0]?.[3]?.body));
+    expect(sentBody).toEqual({
+      content: '',
+      message: 'Update 2026-08-08.md',
+      sha: 'sha-read',
+    });
+  });
+
   it('GitHub の 409 は error: conflict の 409 としてそのまま伝える', async () => {
     mocks.githubApiFetch.mockResolvedValue(
       new Response(JSON.stringify({ message: 'sha does not match current blob sha' }), {
@@ -252,6 +279,27 @@ describe('パラメータ検証（GET / PUT 共通）', () => {
     expect(response.status).toBe(200);
     expect(await readJson(response)).toEqual(
       expect.objectContaining({ path: 'daily/2026-08-08.md', content: '# daily\n' }),
+    );
+  });
+
+  it('空ファイル（content: ""）は空本文のノートとして返す', async () => {
+    mocks.githubApiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ type: 'file', encoding: 'base64', content: '', sha: 'sha-empty' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const response = await onRequestGet(
+      getContext(new Request('http://localhost/api/notes/octocat/notes/blob/empty.md'), {
+        ...PARAMS,
+        path: 'empty.md',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toEqual(
+      expect.objectContaining({ path: 'empty.md', content: '', sha: 'sha-empty' }),
     );
   });
 });

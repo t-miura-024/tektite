@@ -290,7 +290,8 @@ const server = createServer(async (req, res) => {
     const key = `${contentsMatch[1]}/${contentsMatch[2]}:${notePath}`;
     const raw = await readBody(req);
     const body = JSON.parse(raw || '{}');
-    if (typeof body.content !== 'string' || body.content.length === 0) {
+    // 空文字（空ファイル保存）も許容する（Buffer.from('', 'base64') は空バッファになる）
+    if (typeof body.content !== 'string') {
       sendJson(res, 400, { message: 'content must be a base64 string' });
       return;
     }
