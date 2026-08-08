@@ -1,0 +1,104 @@
+/**
+ * グローバルスタイル基盤。
+ *
+ * テーマ設計:
+ * - <html data-theme="light"> … ライト固定
+ * - <html data-theme="dark">  … ダーク固定
+ * - data-theme 未設定          … システム設定（prefers-color-scheme）に追従
+ *
+ * すべての色は CSS 変数経由で参照し、コンポーネントは直接色値を書かない。
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ライトテーマ（既定値） */
+  --color-bg: #ffffff;
+  --color-bg-subtle: #f6f8fa;
+  --color-fg: #1f2328;
+  --color-fg-muted: #59636e;
+  --color-border: #d1d9e0;
+  --color-accent: #0969da;
+  --color-accent-fg: #ffffff;
+  --color-danger: #d1242f;
+
+  /* レイアウト */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 2rem;
+  --radius-md: 6px;
+  --content-max-width: 64rem;
+
+  /* タイポグラフィ */
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0d1117;
+  --color-bg-subtle: #151b23;
+  --color-fg: #f0f6fc;
+  --color-fg-muted: #9198a1;
+  --color-border: #3d444d;
+  --color-accent: #4493f8;
+  --color-accent-fg: #ffffff;
+  --color-danger: #f85149;
+}
+
+/* システム追従: data-theme 未指定時のみ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    color-scheme: dark;
+    --color-bg: #0d1117;
+    --color-bg-subtle: #151b23;
+    --color-fg: #f0f6fc;
+    --color-fg-muted: #9198a1;
+    --color-border: #3d444d;
+    --color-accent: #4493f8;
+    --color-accent-fg: #ffffff;
+    --color-danger: #f85149;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* レスポンシブな基本シェル */
+.app-shell {
+  max-width: var(--content-max-width);
+  margin-inline: auto;
+  padding: clamp(var(--space-md), 4vw, var(--space-lg));
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+}
+
+.app-placeholder {
+  color: var(--color-fg-muted);
+}
