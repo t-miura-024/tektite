@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# cloudflare / wrangler
+.wrangler/
+
+# session scratch (mt-grill-rounds etc.)
+tmp/
+
+# playwright / playwright-bdd
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+.features-gen/
+
+# environment & secrets
+.env
+.env.*
+.dev.vars
+
+# editor / OS
+.DS_Store
+*.local
+
+# logs
+*.log

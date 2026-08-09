@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'tektite-wt-*'
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint / Format / Typecheck / Unit Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: oxlint
+        run: pnpm lint
+      - name: oxfmt (format check)
+        run: pnpm format:check
+      - name: TypeScript typecheck
+        run: pnpm typecheck
+      - name: Vitest (unit)
+        run: pnpm test
+
+  e2e:
+    name: Build / playwright-bdd (E2E)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build (Vite)
+        run: pnpm build
+      - name: Generate Playwright tests from Gherkin
+        run: pnpm exec bddgen test
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run playwright-bdd scenarios
+        run: pnpm exec playwright test
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

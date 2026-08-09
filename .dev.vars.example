@@ -1,0 +1,12 @@
+# wrangler pages dev が読み込むローカル環境変数のテンプレート。
+# 実値は .dev.vars（gitignore 済み）に書いてください。このファイル自体は値を持ちません。
+# OAuth App / Cloudflare のセットアップ手順は docs/setup.md を参照。
+
+# OAuth App の client ID
+GITHUB_CLIENT_ID=
+# OAuth App の client secret
+GITHUB_CLIENT_SECRET=
+# AES-GCM 暗号化 Cookie の鍵（十分な長さの乱数。例: openssl rand -hex 32）
+SESSION_SECRET=
+# OAuth コールバック URL（ローカル開発では下記。デプロイ先では https://<domain>/api/auth/callback）
+OAUTH_REDIRECT_URI=http://localhost:4173/api/auth/callback
