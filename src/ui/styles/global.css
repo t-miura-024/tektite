@@ -307,6 +307,271 @@ body {
   margin-block-start: var(--space-md);
 }
 
+/* Obsidian-like workspace shell. The content area owns the viewport rather than
+   being constrained to a centered document card. */
+.app-shell {
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  padding: 0;
+}
+
+.app-header {
+  min-height: 3.25rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+
+.app-header h1 {
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+
+.vault-screen {
+  grid-template-columns: 2.75rem minmax(15rem, 18rem) minmax(0, 1fr) minmax(13rem, 17rem);
+  gap: 0;
+  min-height: calc(100vh - 3.25rem);
+  margin: 0;
+  background: var(--color-bg);
+}
+
+.workspace-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.7rem 0.35rem;
+  border-right: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-subtle) 78%, var(--color-bg));
+}
+
+.workspace-rail-button {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font: inherit;
+  font-size: 1.15rem;
+  cursor: pointer;
+}
+
+.workspace-rail-button:hover,
+.workspace-rail-button.is-active {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  color: var(--color-accent);
+}
+
+.workspace-rail-spacer {
+  flex: 1;
+}
+
+.vault-sidebar {
+  min-width: 0;
+  padding: 0.65rem 0.55rem;
+  border-right: 1px solid var(--color-border);
+  overflow: auto;
+}
+
+.vault-sidebar-header {
+  padding: 0.15rem 0.25rem 0.7rem;
+}
+
+.vault-back-link {
+  font-size: 0.75rem;
+}
+
+.vault-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.vault-header-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.vault-header-actions .button-secondary {
+  padding: 0.25rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.file-tree-toggle,
+.file-tree-link {
+  min-height: 1.7rem;
+  padding-block: 0.15rem;
+  border-radius: 0.25rem;
+  font-size: 0.8rem;
+}
+
+.file-tree-link.is-selected {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-fg);
+}
+
+.vault-content {
+  display: flex;
+  min-width: 0;
+  min-height: calc(100vh - 3.25rem);
+  flex-direction: column;
+}
+
+.workspace-tabs {
+  display: flex;
+  align-items: stretch;
+  min-height: 2.35rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+
+.workspace-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 9rem;
+  max-width: 20rem;
+  padding: 0.35rem 0.7rem;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 2px solid var(--color-accent);
+  color: var(--color-fg);
+  font-size: 0.78rem;
+}
+
+.workspace-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tab button,
+.workspace-tab-add {
+  border: 0;
+  background: transparent;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+}
+
+.workspace-tab button {
+  margin-inline-start: auto;
+}
+
+.workspace-tab-add {
+  padding: 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.note-pane {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.note-pane-header {
+  padding: 0.45rem 0.9rem;
+  background: var(--color-bg);
+}
+
+.note-pane-path {
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+}
+
+.workspace-right-sidebar {
+  min-width: 0;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+  overflow: auto;
+}
+
+.workspace-right-tabs {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.workspace-right-tabs button {
+  flex: 1;
+  padding: 0.35rem 0.25rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.workspace-right-tabs button.is-active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-fg);
+}
+
+.workspace-right-sidebar .vault-sidebar-section {
+  margin: 0;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.workspace-statusbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.9rem;
+  min-height: 1.65rem;
+  padding: 0.25rem 0.7rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-fg-muted);
+  font-size: 0.68rem;
+}
+
+@media (max-width: 72rem) {
+  .vault-screen {
+    grid-template-columns: 2.75rem minmax(14rem, 17rem) minmax(0, 1fr);
+  }
+
+  .workspace-right-sidebar {
+    display: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  .vault-screen {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .workspace-rail {
+    flex-direction: row;
+    min-height: 2.75rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .workspace-rail-spacer {
+    margin-inline-start: auto;
+  }
+
+  .vault-sidebar {
+    max-height: 40vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .vault-content {
+    min-height: 60vh;
+  }
+
+  .workspace-statusbar {
+    overflow-x: auto;
+    justify-content: flex-start;
+    white-space: nowrap;
+  }
+}
+
 @media (min-width: 48rem) {
   .vault-screen {
     grid-template-columns: minmax(16rem, 20rem) minmax(0, 1fr);
@@ -1383,4 +1648,22 @@ body {
 .move-dialog-blocked-note {
   margin-left: var(--space-sm);
   font-size: 0.75rem;
+}
+
+/* Workspace layout overrides the legacy two-column vault layout above. */
+@media (min-width: 48rem) {
+  .vault-screen {
+    grid-template-columns: 2.75rem minmax(15rem, 18rem) minmax(0, 1fr) minmax(13rem, 17rem);
+  }
+
+  .vault-sidebar {
+    border-right: 1px solid var(--color-border);
+    padding-right: 0.55rem;
+  }
+}
+
+@media (max-width: 72rem) and (min-width: 48rem) {
+  .vault-screen {
+    grid-template-columns: 2.75rem minmax(14rem, 17rem) minmax(0, 1fr);
+  }
 }
