@@ -90,4 +90,25 @@ pnpm exec wrangler pages dev dist
 
 `.dev.vars` の `OAUTH_REDIRECT_URI` は `http://localhost:4173/api/auth/callback` を使う。この URL を OAuth App の callback として登録すればローカルでも実ログインを検証できる（GitHub OAuth App は localhost の callback も登録可能）。
 
-E2E（`pnpm test:e2e`）は資格情報不要: OAuth の各エンドポイントはモック（`features/support/mock-github-server.mjs` + Playwright route）に差し替えられる。
+E2E（`pnpm test:e2e`）は資格情報不要: OAuth の各エンドポイントはモック（`features/support/mock-github-server.mjs` + Playwright route）に差し替えられる。初回実行時のみ Playwright のブラウザをインストールする:
+
+```sh
+pnpm exec playwright install chromium
+```
+
+E2E は `features/**/*.feature`（受け入れ基準の Gherkin）を playwright-bdd で生成して実行する。モックサーバーと `wrangler pages dev`（`--binding` でテスト用の OAuth 値を注入）を自動起動するため、`.dev.vars` の設定が無くても動く。
+
+## 6. CI とデプロイ
+
+GitHub Actions が push / PR で以下を実行する:
+
+- `.github/workflows/ci.yml`: `pnpm lint` + `pnpm format:check` + `pnpm typecheck` + `pnpm test`（ユニット）+ `pnpm build` + `pnpm test:e2e`（Gherkin 全シナリオ）。E2E は `pnpm exec playwright install --with-deps chromium` でブラウザを導入してから実行する。対象ブランチは `main` と `tektite-wt-*`、および全 PR
+- `.github/workflows/deploy.yml`: `main` への push で `pnpm deploy`（`wrangler pages deploy`）により Cloudflare Pages へ自動デプロイする。2 節のシークレットが未設定の間はデプロイをスキップして正常終了する（CI は失敗しない）
+
+ローカルの検収手順（CI と同じチェック）:
+
+```sh
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e
+```
+
+デプロイ先 URL は Cloudflare Pages が発行する `https://tektite.pages.dev`（プロジェクト名は `wrangler.jsonc` の `name`）。プレビュー環境（コミットごとの `*.pages.dev` URL）は 3 節の注意（redirect URI の制限）に従い、OAuth App の登録が必要になる。
