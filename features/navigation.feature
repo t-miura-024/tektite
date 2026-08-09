@@ -8,6 +8,9 @@
   ファイル名のみの高速移動（fzf 的な部分列一致。例: "tkt" → "tektite"）。
   テスト用ノートは既存のモック（daily/2026-08-08.md / projects/tektite.md /
   render.md / tags.md 等）を利用し、保存系シナリオ（save.feature）の影響を受けない。
+  タグ一致の検証は、タグ語（tagged）を本文に含まずフロントマテリアのタグのみを
+  持つ meeting.md を使う（tags.md は本文にインライン #tagged を持つため content
+  一致になり、タグ一致の検証にならない）。
 
   シナリオ: Cmd+K で全文検索を開き本文検索からノートを開く
     前提 GitHub OAuth のモックが有効である
@@ -43,11 +46,11 @@
     かつ ユーザーが全文検索を開く
     ならば 全文検索パネルが表示される
     もし ユーザーが検索欄に "tagged" と入力する
-    ならば 検索結果にノート "tags.md" が表示される
+    ならば 検索結果にノート "meeting.md" が表示される
     かつ 検索結果にタグ "#tagged" が表示される
-    もし ユーザーが検索結果の選択を確定する
-    ならば 表示中の URL は "/octocat/notes/blob/tags.md" である
-    かつ ノートペインにノート "tags.md" が表示される
+    もし ユーザーが検索結果のノート "meeting.md" をクリックする
+    ならば 表示中の URL は "/octocat/notes/blob/meeting.md" である
+    かつ ノートペインにノート "meeting.md" が表示される
 
   シナリオ: Cmd+O でクイックスイッチャーを開きファジー検索からノートを開く
     前提 GitHub OAuth のモックが有効である

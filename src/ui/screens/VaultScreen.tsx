@@ -109,6 +109,10 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       }
       const message = vaultErrorMessage(error);
       setState({ kind: 'error', message });
+      // ツリー取得失敗時も検索パネル・クイックスイッチャーを「読み込み中…」のままに
+      // しない（indexError を設定し、エラー表示 + 再試行導線へ切り替える）
+      // （difit 指摘: ツリー取得失敗時の indexError 未設定）
+      setIndexError(message);
       notify(message, { label: '再試行', onClick: () => void load() });
       return;
     }
@@ -147,17 +151,23 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   }, [noteIndex, state]);
 
   // 全文検索器: 共有索引（本文 + パス）と記法索引（タグ）を統合して構築する。
-  // ノート索引の更新（保存反映・再ロード）のたびに再構築される（M2）
+  // ノート索引の更新（保存反映・再ロード）のたびに再構築される（M2）。
+  // 検索対象は本文（フロントマテリアを除いたボディ）とする。フロントマテリアの
+  // タグは tags フィールドで検索されるため、タグ語が本文に現れないノート
+  // （インライン `#tagged` のないノート）でもタグ一致（kind='tag'）として分類される
+  // （difit 指摘: タグ一致 E2E が実質 content マッチに依存していた問題）
   const searcher = useMemo<NoteSearcher | null>(() => {
     if (noteIndex === null || notation === null) {
       return null;
     }
     const notes: SearchableNote[] = [];
     for (const note of noteIndex.notes.values()) {
+      const notationNote = notation.notes.get(note.path);
+      const bodyStart = notationNote?.frontmatter?.to;
       notes.push({
         path: note.path,
-        content: note.content,
-        tags: notation.notes.get(note.path)?.tags ?? [],
+        content: bodyStart === undefined ? note.content : note.content.slice(bodyStart),
+        tags: notationNote?.tags ?? [],
       });
     }
     return createNoteSearcher(notes);

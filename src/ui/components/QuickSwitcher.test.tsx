@@ -197,4 +197,45 @@ describe('QuickSwitcher', () => {
     expect(closed).toBe(true);
     root.unmount();
   });
+
+  it('Tab キーでフォーカスがパレット内に留まる', async () => {
+    const { container, root, input } = await renderSwitcher(NOTE_PATHS);
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    // フォーカス可能要素が入力のみの場合は入力へ戻る（背景へ抜けない）
+    expect(document.activeElement).toBe(input);
+    expect(container.contains(input)).toBe(true);
+    root.unmount();
+  });
+
+  it('エラー表示時は Tab で入力と再試行ボタンの間を循環する', async () => {
+    const { container, root, input } = await renderSwitcher(
+      null,
+      () => {},
+      true,
+      () => {},
+    );
+    const retry = container.querySelector('button');
+    expect(retry).not.toBeNull();
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(retry);
+    await act(async () => {
+      retry!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(input);
+    // Shift+Tab でも末尾から循環する
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }),
+      );
+    });
+    expect(document.activeElement).toBe(retry);
+    root.unmount();
+  });
 });

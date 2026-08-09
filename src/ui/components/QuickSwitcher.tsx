@@ -13,12 +13,13 @@
  * 開ける（完了条件 4）。空クエリは全ノートを表示する（一覧から直接選ぶ導線）。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { searchNoteNames } from '@/application/quick-switch';
 import type { VaultRef } from '@/domain/vault';
 
+import { useFocusTrap } from '@/ui/focus-trap';
 import { navigate, noteRoutePath } from '@/ui/router';
 
 /** 一致位置の文字を <mark> で装飾した断片を返す（一致がなければ素の文字列） */
@@ -62,6 +63,10 @@ export function QuickSwitcher({
 }: QuickSwitcherProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Tab キーでフォーカスをパレット内に留める（背景のツリー・エディタへ抜けない）
+  // （difit 指摘: フォーカストラップ未対応）
+  useFocusTrap(containerRef, true);
 
   const results = useMemo(
     () => (notePaths === null ? [] : searchNoteNames(notePaths, query)),
@@ -104,9 +109,11 @@ export function QuickSwitcher({
 
   return (
     <div
+      ref={containerRef}
       className="quick-switch-overlay"
       data-testid="quick-switcher"
       role="dialog"
+      aria-modal="true"
       aria-label="クイックスイッチャー"
       onClick={(event) => {
         if (event.target === event.currentTarget) {

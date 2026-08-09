@@ -108,6 +108,7 @@ const TREES = {
     { path: 'daily/2026-08-08.md', type: 'blob' },
     { path: 'decoration.md', type: 'blob' },
     { path: 'embeds.md', type: 'blob' },
+    { path: 'meeting.md', type: 'blob' },
     { path: 'projects', type: 'tree' },
     { path: 'projects/tektite.md', type: 'blob' },
     { path: 'render.md', type: 'blob' },
@@ -158,6 +159,14 @@ const NOTES = {
     sha: 'sha-tags',
     content:
       '---\ntags:\n  - area/project\n---\n# タグのノート\n\n## セクション\n\nバックリンクとタグ一覧の検証用ノートです。\n\n#tagged\n',
+  },
+  // タグ一致の検索 E2E（features/navigation.feature）用。タグ語（tagged）を本文に
+  // 含めずフロントマテリアのタグのみを持たせることで、検索時に kind='tag' として
+  // 分類されることを検証する（tags.md のインライン #tagged は content 一致になる）
+  'octocat/notes:meeting.md': {
+    sha: 'sha-meeting',
+    content:
+      '---\ntags:\n  - tagged\n---\n# ミーティングのノート\n\nタグ一致の検索を検証するためのノートです。\n',
   },
   'octocat/notes:embeds.md': {
     sha: 'sha-embeds',

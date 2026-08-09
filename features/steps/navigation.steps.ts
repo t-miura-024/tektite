@@ -51,7 +51,16 @@ Then('検索結果にノート {string} が表示される', async ({ page }, no
 });
 
 Then('検索結果にタグ {string} が表示される', async ({ page }, tag: string) => {
-  await expect(page.getByTestId('search-result').getByText(tag)).toBeVisible();
+  // タグ一致（kind='tag'）のときだけ描画される .search-result-tag を対象にする。
+  // 本文スニペット中のタグ文字列（buildSnippet の切り出し）との混同を防ぐ
+  // （difit 指摘: タグ表示の検証が実質 content マッチに依存していた問題）
+  await expect(page.locator('.search-result-tag').getByText(tag)).toBeVisible();
+});
+
+When('ユーザーが検索結果のノート {string} をクリックする', async ({ page }, notePath: string) => {
+  // 検索結果は本文一致が先頭に並ぶため、タグ一致のノートを開く場合は
+  // 対象ノートを直接クリックする（Enter だと本文一致の先頭が開かれる）
+  await page.getByTestId('search-result').filter({ hasText: notePath }).click();
 });
 
 Then(

@@ -11,12 +11,13 @@
  * 広がり、同一機能を検索ボタンから使える（完了条件 4）。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { noteDisplayName } from '@/application/note-name';
 import type { NoteSearcher, SearchHit } from '@/application/search';
 import type { VaultRef } from '@/domain/vault';
 
+import { useFocusTrap } from '@/ui/focus-trap';
 import { navigate, noteRoutePath } from '@/ui/router';
 
 export interface SearchPanelProps {
@@ -39,6 +40,10 @@ export function SearchPanel({
 }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Tab キーでフォーカスをパネル内に留める（背景のツリー・エディタへ抜けない）
+  // （difit 指摘: フォーカストラップ未対応）
+  useFocusTrap(containerRef, true);
 
   const results = useMemo<readonly SearchHit[]>(() => {
     if (searcher === null) {
@@ -83,9 +88,11 @@ export function SearchPanel({
 
   return (
     <div
+      ref={containerRef}
       className="search-overlay"
       data-testid="search-panel"
       role="dialog"
+      aria-modal="true"
       aria-label="全文検索"
       onClick={(event) => {
         if (event.target === event.currentTarget) {

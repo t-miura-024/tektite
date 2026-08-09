@@ -192,6 +192,49 @@ describe('SearchPanel', () => {
     root.unmount();
   });
 
+  it('Tab キーでフォーカスがパネル内に留まる', async () => {
+    const { container, root, input } = await renderPanel(
+      createNoteSearcher([{ path: 'notes/alpha.md', content: '本文', tags: [] }]),
+    );
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    // フォーカス可能要素が入力のみの場合は入力へ戻る（背景へ抜けない）
+    expect(document.activeElement).toBe(input);
+    expect(container.contains(input)).toBe(true);
+    root.unmount();
+  });
+
+  it('エラー表示時は Tab で入力と再試行ボタンの間を循環する', async () => {
+    const { container, root, input } = await renderPanel(
+      null,
+      () => {},
+      true,
+      () => {},
+    );
+    const retry = container.querySelector('button');
+    expect(retry).not.toBeNull();
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(retry);
+    await act(async () => {
+      retry!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(input);
+    // Shift+Tab でも末尾から循環する
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }),
+      );
+    });
+    expect(document.activeElement).toBe(retry);
+    root.unmount();
+  });
+
   it('結果表示は一致スニペットをハイライトする', async () => {
     const searcher = createNoteSearcher([
       { path: 'notes/alpha.md', content: '本文に キーワード を含む', tags: [] },
@@ -201,6 +244,30 @@ describe('SearchPanel', () => {
     const marks = container.querySelectorAll('.search-result-snippet mark');
     expect(marks.length).toBeGreaterThan(0);
     expect(marks[0]?.textContent).toBe('キーワード');
+    root.unmount();
+  });
+
+  it('タグ一致の結果はタグ表示（.search-result-tag）を描画する', async () => {
+    // 本文にタグ語を含まないノートのタグ一致（kind='tag'）で描画される
+    const searcher = createNoteSearcher([
+      { path: 'meeting.md', content: '本文にタグ語を含まないノート', tags: ['tagged'] },
+    ]);
+    const { container, root, input } = await renderPanel(searcher);
+    await typeQuery(input, 'tagged');
+    const tags = container.querySelectorAll('.search-result-tag');
+    expect(tags).toHaveLength(1);
+    expect(tags[0]?.textContent).toBe('#tagged');
+    root.unmount();
+  });
+
+  it('本文一致の結果はタグ表示を描画しない', async () => {
+    // 本文にタグ語を含むノートは content 一致になり、.search-result-tag が出ない
+    const searcher = createNoteSearcher([
+      { path: 'tags.md', content: '本文に #tagged を含むノート', tags: [] },
+    ]);
+    const { container, root, input } = await renderPanel(searcher);
+    await typeQuery(input, 'tagged');
+    expect(container.querySelectorAll('.search-result-tag')).toHaveLength(0);
     root.unmount();
   });
 });
