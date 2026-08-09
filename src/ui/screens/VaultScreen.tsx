@@ -20,6 +20,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { applySavedNote, loadNoteIndex } from '@/application/note-index';
 import type { NoteIndex } from '@/application/note-index';
+import { createNoteSearcher } from '@/application/search';
+import type { NoteSearcher, SearchableNote } from '@/application/search';
 import { openVault } from '@/application/vault';
 import { run } from '@/composition';
 import { buildNotationIndex } from '@/domain/notation/index';
@@ -33,6 +35,7 @@ import { BacklinkPanel } from '@/ui/components/BacklinkPanel';
 import { FileTree } from '@/ui/components/FileTree';
 import { Link } from '@/ui/components/Link';
 import { NotePane } from '@/ui/components/NotePane';
+import { SearchPanel } from '@/ui/components/SearchPanel';
 import { TagPanel } from '@/ui/components/TagPanel';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError, vaultErrorMessage } from '@/ui/vault-error';
@@ -77,6 +80,8 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
    * レジストリへ反映し、この state も更新する。
    */
   const [noteIndex, setNoteIndex] = useState<NoteIndex | null>(null);
+  /** 全文検索パネルの開閉（Cmd+K / Ctrl+K と検索ボタンから操作する） */
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -127,6 +132,35 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     }
     return buildNotationIndex({ filePaths, contents });
   }, [noteIndex, state]);
+
+  // 全文検索器: 共有索引（本文 + パス）と記法索引（タグ）を統合して構築する。
+  // ノート索引の更新（保存反映・再ロード）のたびに再構築される（M2）
+  const searcher = useMemo<NoteSearcher | null>(() => {
+    if (noteIndex === null || notation === null) {
+      return null;
+    }
+    const notes: SearchableNote[] = [];
+    for (const note of noteIndex.notes.values()) {
+      notes.push({
+        path: note.path,
+        content: note.content,
+        tags: notation.notes.get(note.path)?.tags ?? [],
+      });
+    }
+    return createNoteSearcher(notes);
+  }, [noteIndex, notation]);
+
+  // Cmd+K / Ctrl+K: 全文検索パネルの開閉（M2。Cmd+S とは衝突しない）
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setSearchOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   /**
    * ノート保存後に共有索引とバックリンク / タグ索引を更新する。保存済みの本文を
@@ -195,6 +229,13 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             ← Vault 一覧
           </Link>
           <h2 className="vault-title">{vaultRefFullName(vaultRef)}</h2>
+          <button
+            type="button"
+            className="button-secondary search-open-button"
+            onClick={() => setSearchOpen(true)}
+          >
+            検索 <span className="search-open-shortcut">⌘K</span>
+          </button>
         </div>
         {state.kind === 'loading' && (
           <p className="app-placeholder" role="status">
@@ -253,6 +294,9 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           <p className="app-placeholder">ツリーからファイルを選択してください。</p>
         )}
       </section>
+      {searchOpen && (
+        <SearchPanel vaultRef={vaultRef} searcher={searcher} onClose={() => setSearchOpen(false)} />
+      )}
     </div>
   );
 }
