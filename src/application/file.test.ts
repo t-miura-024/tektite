@@ -223,6 +223,25 @@ describe('applyFileOperation', () => {
     expect((error as FileCommitError).message).toBe('「missing.md」は存在しません。');
   });
 
+  it('rename-directory は展開後の移動先が既存ファイルと衝突すると失敗し、コミットしない', async () => {
+    // projects/tektite.md を daily/ へ移動すると daily/tektite.md（既存）と衝突する
+    const gateway = fakeGateway({
+      ...DATA,
+      notes: [
+        { path: 'projects/tektite.md', sha: 'sha-t', content: '# tektite\n' },
+        { path: 'daily/tektite.md', sha: 'sha-d', content: '# daily\n' },
+      ],
+    });
+    const { error, gateway: captured } = await runOperationEither(
+      { kind: 'rename-directory', from: 'projects', to: 'daily' },
+      ['projects/tektite.md', 'daily/tektite.md'],
+      gateway,
+    );
+    expect(error).toBeInstanceOf(FileCommitError);
+    expect((error as FileCommitError).message).toBe('移動先「daily/tektite.md」は既に存在します。');
+    expect(captured.lastInput()).toBeNull();
+  });
+
   it('rename-directory は配下の全ファイル（添付含む）を移動し、リンクを張り替える', async () => {
     const gateway = fakeGateway({
       ...DATA,

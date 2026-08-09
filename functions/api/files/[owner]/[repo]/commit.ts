@@ -289,33 +289,16 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
     readonly sha: string | null;
   }
   const delta = new Map<string, DeltaEntry>();
+  // create/update は Blob 作成が要るため対象を一旦集め（順序保持）、
+  // move/delete は即座に差分エントリへ反映する
+  const blobOps: { readonly path: string; readonly content: string }[] = [];
   for (const change of body.changes) {
     if (change.op === 'create' || change.op === 'update') {
-      let blobResponse: Response;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- 同一パスの後続変更を勝たせるため順次処理する
-        blobResponse = await githubApiFetch(base, `/repos/${owner}/${repoName}/git/blobs`, token, {
-          method: 'POST',
-          body: JSON.stringify({ content: change.content, encoding: 'base64' }),
-        });
-      } catch {
-        return githubUnreachable();
+      if (change.content === null) {
+        // parseCommitBody で保証されるため到達しない（型の防御線）
+        return Response.json({ error: 'invalid_body' }, { status: 400 });
       }
-      const blobFailure = mapGithubFailure(blobResponse);
-      if (blobFailure) {
-        return blobFailure;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- blob 応答を順次処理する
-      const blobBody = (await blobResponse.json().catch(() => null)) as GithubBlobResponse | null;
-      if (typeof blobBody?.sha !== 'string' || blobBody.sha.length === 0) {
-        return Response.json({ error: 'github_error' }, { status: 502 });
-      }
-      delta.set(change.path, {
-        path: change.path,
-        mode: '100644',
-        type: 'blob',
-        sha: blobBody.sha,
-      });
+      blobOps.push({ path: change.path, content: change.content });
     } else if (change.op === 'delete') {
       delta.set(change.path, { path: change.path, mode: '100644', type: 'blob', sha: null });
     } else {
@@ -334,6 +317,39 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
       delta.set(change.to, { path: change.to, mode: '100644', type: 'blob', sha: sourceSha });
       delta.set(change.path, { path: change.path, mode: '100644', type: 'blob', sha: null });
     }
+  }
+  // 独立パスの Blob 作成は並列化する（順序依存はなく、同一パスの後勝ちは
+  // blobOps の並び順で下の delta.set が担保する）
+  type BlobResult =
+    | { readonly ok: true; readonly path: string; readonly sha: string }
+    | { readonly ok: false; readonly error: Response };
+  const blobResults: BlobResult[] = await Promise.all(
+    blobOps.map(async ({ path, content }): Promise<BlobResult> => {
+      let blobResponse: Response;
+      try {
+        blobResponse = await githubApiFetch(base, `/repos/${owner}/${repoName}/git/blobs`, token, {
+          method: 'POST',
+          body: JSON.stringify({ content, encoding: 'base64' }),
+        });
+      } catch {
+        return { ok: false, error: githubUnreachable() };
+      }
+      const blobFailure = mapGithubFailure(blobResponse);
+      if (blobFailure) {
+        return { ok: false, error: blobFailure };
+      }
+      const blobBody = (await blobResponse.json().catch(() => null)) as GithubBlobResponse | null;
+      if (typeof blobBody?.sha !== 'string' || blobBody.sha.length === 0) {
+        return { ok: false, error: Response.json({ error: 'github_error' }, { status: 502 }) };
+      }
+      return { ok: true, path, sha: blobBody.sha };
+    }),
+  );
+  for (const result of blobResults) {
+    if (!result.ok) {
+      return result.error;
+    }
+    delta.set(result.path, { path: result.path, mode: '100644', type: 'blob', sha: result.sha });
   }
 
   // 5) 新 tree を作成する（base_tree を継承し、差分エントリを適用。

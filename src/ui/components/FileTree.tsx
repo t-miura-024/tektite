@@ -79,6 +79,23 @@ function descendants(path: string, directories: readonly string[]): Set<string> 
   return blocked;
 }
 
+/**
+ * 移動ダイアログの禁止先（自分自身の配下。ファイルは現在の親ディレクトリも）。
+ * ファイルを現在の親へ「移動」すると to === from になり、
+ * コミット側が「移動元と移動先が同じです」のエラーを返すため、未然に防ぐ。
+ */
+function blockedMoveTargets(
+  target: { readonly path: string; readonly type: 'file' | 'directory' },
+  directories: readonly string[],
+): Set<string> {
+  const blocked = descendants(target.path, directories);
+  if (target.type === 'file') {
+    const lastSlash = target.path.lastIndexOf('/');
+    blocked.add(lastSlash === -1 ? '' : target.path.slice(0, lastSlash));
+  }
+  return blocked;
+}
+
 export function FileTree({
   root,
   vaultRef,
@@ -350,7 +367,7 @@ export function FileTree({
               : pathBaseName(moveTarget.path)
           }
           directories={directories()}
-          blocked={descendants(moveTarget.path, directories())}
+          blocked={blockedMoveTargets(moveTarget, directories())}
           onCancel={() => setMoveTarget(null)}
           onConfirm={(targetDirectory) => {
             const target = moveTarget;

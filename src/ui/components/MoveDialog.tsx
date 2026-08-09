@@ -2,8 +2,8 @@
  * 移動先ディレクトリ選択ダイアログ（M5: ノート/ディレクトリの移動）。
  *
  * Vault 内のディレクトリ一覧（ルート含む）から移動先を選ぶ。
- * ディレクトリ自身の配下（自分を自分の中へ移動する操作）は禁止先として
- * 無効化する。実行前に必ずダイアログを挟む（誤操作の防止）。
+ * 禁止先（ディレクトリ自身の配下・ファイルの現在の親）は無効化する。
+ * 実行前に必ずダイアログを挟む（誤操作の防止）。
  */
 
 import { useMemo, useState } from 'react';
@@ -63,7 +63,9 @@ export function MoveDialog({
                   onClick={() => setSelected(directory)}
                 >
                   {displayName(directory)}
-                  {isBlocked && <span className="move-dialog-blocked-note">（自身の配下）</span>}
+                  {isBlocked && (
+                    <span className="move-dialog-blocked-note">（選択できません）</span>
+                  )}
                 </button>
               </li>
             );

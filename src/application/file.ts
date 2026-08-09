@@ -220,7 +220,18 @@ function buildChanges(
     if (children.length === 0) {
       return validationFailure(`「${from}」は存在しません。`);
     }
-    return children.map((path) => ({ from: path, to: `${to}${path.slice(from.length)}` }));
+    const moves = children.map((path) => ({ from: path, to: `${to}${path.slice(from.length)}` }));
+    // 展開後の個別移動先が既存ファイルと衝突する場合は失敗させる。
+    // 先の existing.has(to) はディレクトリ自身の検証にしかならないため、
+    // 例: 既存の daily/tektite.md がある Vault で projects/ を daily/ へ移動すると
+    // 一括コミットの delta 上書きで既存ファイルの内容が失われる（実削除同様に
+    // git 履歴を除いて取り返しがつかない）。移動元自身が移動先になるケースは
+    // from === to の検証で除外済みで、展開後の to が from 配下に一致することもない
+    const colliding = moves.find((move) => existing.has(move.to.toLowerCase()));
+    if (colliding !== undefined) {
+      return validationFailure(`移動先「${colliding.to}」は既に存在します。`);
+    }
+    return moves;
   };
 
   const expanded = expandMove(operation.from, operation.to);

@@ -247,7 +247,7 @@ describe('FileTree のファイル操作', () => {
     root.unmount();
   });
 
-  it('ファイルの移動はすべてのディレクトリ（ルート含む）を選べる', async () => {
+  it('ファイルの移動は現在の親ディレクトリ（ルート含む）を選べない', async () => {
     const { container, root, callbacks } = await renderTree();
 
     const fileLink = [...container.querySelectorAll('a.file-tree-link')].find(
@@ -263,10 +263,14 @@ describe('FileTree のファイル操作', () => {
       findByTestId(container, 'file-menu-move').click();
     });
 
+    // logo.png はルート直下のため、現在の親（Vault ルート）は無効。選べるのは daily のみ
     const options = container.querySelectorAll('[data-testid="move-dialog-option"]');
-    expect(options.length).toBe(2); // ルート + daily（ファイル自身は候補に影響しない）
+    const blocked = container.querySelectorAll('[data-testid="move-dialog-blocked"]');
+    expect(options.length).toBe(1); // daily（現在の親のルートは無効）
+    expect(blocked.length).toBe(1);
+    expect(blocked[0]?.textContent).toContain('Vault ルート');
     await act(async () => {
-      (options[1] as HTMLElement).click();
+      (options[0] as HTMLElement).click();
     });
     await act(async () => {
       findByTestId(container, 'move-dialog-confirm').click();
