@@ -483,7 +483,7 @@ function FileTreeNode({
         onContextMenu={openMenuAt}
       >
         <span className="file-tree-caret" aria-hidden="true">
-          {isOpen ? '▾' : '▸'}
+          {isOpen ? '⌄' : '›'}
         </span>
         <span className="file-tree-name">{node.name}</span>
       </button>

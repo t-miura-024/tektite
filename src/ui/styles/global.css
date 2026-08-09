@@ -2009,6 +2009,11 @@ body {
   text-align: center;
 }
 
+.vault-workspace-shell .file-tree-toggle,
+.vault-workspace-shell .file-tree-link {
+  color: #949fbe;
+}
+
 .vault-workspace-shell .file-tree-link.is-selected {
   background: #a970ff;
   color: #ffffff;
