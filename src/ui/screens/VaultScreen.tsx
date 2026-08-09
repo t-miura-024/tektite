@@ -325,6 +325,26 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
 
   return (
     <div className="vault-screen">
+      <nav className="workspace-rail" aria-label="ワークスペース">
+        <button type="button" className="workspace-rail-button is-active" aria-label="ファイル">
+          ▣
+        </button>
+        <button
+          type="button"
+          className="workspace-rail-button"
+          aria-label="検索"
+          onClick={() => setSearchOpen(true)}
+        >
+          ⌕
+        </button>
+        <button type="button" className="workspace-rail-button" aria-label="ブックマーク">
+          ♡
+        </button>
+        <span className="workspace-rail-spacer" />
+        <button type="button" className="workspace-rail-button" aria-label="設定">
+          ⚙
+        </button>
+      </nav>
       <aside className="vault-sidebar">
         <div className="vault-sidebar-header">
           <Link to="/" className="vault-back-link">
@@ -421,20 +441,19 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             />
           </>
         )}
-        {notation !== null && (
-          <section className="vault-sidebar-section" aria-label="タグ一覧">
-            <h3 className="vault-sidebar-section-title">タグ</h3>
-            <TagPanel vaultRef={vaultRef} tagIndex={notation.tagIndex} notes={notation.notes} />
-          </section>
-        )}
-        {notation !== null && notePath !== null && (
-          <section className="vault-sidebar-section" aria-label="バックリンク">
-            <h3 className="vault-sidebar-section-title">バックリンク</h3>
-            <BacklinkPanel vaultRef={vaultRef} links={notation.backlinks.get(notePath) ?? []} />
-          </section>
-        )}
       </aside>
       <section className="vault-content">
+        <div className="workspace-tabs" role="tablist" aria-label="開いているノート">
+          <div className="workspace-tab is-active" role="tab" aria-selected="true">
+            <span>{notePath === null ? 'Vault' : pathBaseName(notePath)}</span>
+            <button type="button" aria-label="タブを閉じる" disabled={notePath === null}>
+              ×
+            </button>
+          </div>
+          <button type="button" className="workspace-tab-add" aria-label="新しいタブ">
+            +
+          </button>
+        </div>
         {notePath !== null ? (
           <NotePane
             vaultRef={vaultRef}
@@ -457,7 +476,37 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
         ) : (
           <p className="app-placeholder">ツリーからファイルを選択してください。</p>
         )}
+        <footer className="workspace-statusbar" aria-label="ステータスバー">
+          <span>{state.kind === 'ready' ? state.tree.defaultBranch : 'main'}</span>
+          <span>{notePath === null ? 'ノート未選択' : 'Markdown'}</span>
+          <span>⌘K 検索</span>
+          <span>⌘O クイックスイッチャー</span>
+        </footer>
       </section>
+      <aside className="workspace-right-sidebar" aria-label="補助ペイン">
+        <div className="workspace-right-tabs" role="tablist" aria-label="補助ペイン">
+          <button type="button" className="is-active" role="tab" aria-selected="true">
+            アウトライン
+          </button>
+          <button type="button" role="tab" aria-selected="false">
+            バックリンク
+          </button>
+        </div>
+        {notation !== null && (
+          <>
+            <section className="vault-sidebar-section" aria-label="タグ一覧">
+              <h3 className="vault-sidebar-section-title">タグ</h3>
+              <TagPanel vaultRef={vaultRef} tagIndex={notation.tagIndex} notes={notation.notes} />
+            </section>
+            {notePath !== null && (
+              <section className="vault-sidebar-section" aria-label="バックリンク">
+                <h3 className="vault-sidebar-section-title">バックリンク</h3>
+                <BacklinkPanel vaultRef={vaultRef} links={notation.backlinks.get(notePath) ?? []} />
+              </section>
+            )}
+          </>
+        )}
+      </aside>
       {searchOpen && (
         <SearchPanel
           vaultRef={vaultRef}

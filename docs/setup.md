@@ -1,7 +1,7 @@
 # tektite セットアップガイド
 
 デプロイ先（Cloudflare Pages）と認証（GitHub OAuth App）の初期設定手順を 1 箇所に集約する。
-ローカル開発だけなら「ローカル開発」の節だけで動く（E2E は資格情報なしで実行可能）。
+ローカル開発だけなら「7. ローカル開発」の節だけで動く（E2E は資格情報なしで実行可能）。
 
 ## 前提
 
@@ -9,70 +9,160 @@
 - Cloudflare アカウント（無料枠で可）
 - GitHub アカウント（OAuth App を作成できる権限）
 
+---
+
 ## 1. Cloudflare Pages プロジェクトの作成
 
-```sh
-pnpm exec wrangler pages project create tektite
-```
+**手順:**
 
-- 初回は `wrangler login` で Cloudflare に認証する（ブラウザが開き、キーチェーンに保存される）。
-- すでにプロジェクトがある場合はスキップしてよい。
+1. リポジトリのルートで以下を実行する（初回は `wrangler login` がブラウザを開き、Cloudflare に認証される。キーチェーンに保存される）:
 
-## 2. GitHub リポジトリ secrets（デプロイ用）
+   ```sh
+   pnpm exec wrangler pages project create tektite
+   ```
 
-GitHub リポジトリの Settings → Secrets and variables → Actions に以下を設定する。
+2. すでにプロジェクトがある場合はスキップしてよい。
 
-| Secret 名               | 内容                                                    |
-| ----------------------- | ------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`  | Cloudflare API トークン（Pages へのデプロイ権限が必要） |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare アカウント ID（ダッシュボード右側に表示）    |
-
-未設定の場合、`.github/workflows/deploy.yml` はデプロイステップをスキップし、notice を残して正常終了する（CI 自体は失敗しない）。設定後に push すると自動デプロイされる。
-
-## 3. GitHub OAuth App の作成
-
-GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**:
-
-| 項目                       | 値                                            |
-| -------------------------- | --------------------------------------------- |
-| Application name           | 任意（例: `tektite`）                         |
-| Homepage URL               | `https://tektite.pages.dev`                   |
-| Authorization callback URL | `https://tektite.pages.dev/api/auth/callback` |
-
-作成後、client ID を控える。client secret はこの画面でしか発行できないため、発行して控える。
-
-**注意（redirect URI の制限）**: GitHub OAuth App はワイルドカードの redirect URI を登録できない。Cloudflare Pages のプレビュー環境（`https://<hash>.<project>.pages.dev`）ごとに callback URL が変わるため、プレビュー環境でもログインを検証したい場合は**プレビュー環境ごとに別の OAuth App を作成**し、環境変数を切り替えること。個人利用では**本番（`tektite.pages.dev`）専用**にするのが簡単。
-
-## 4. Cloudflare の環境変数（vars / secrets）
-
-Pages Functions が読む環境変数（`functions/env.d.ts` 対応表）:
-
-| キー                   | 種別   | 内容                                                                           |
-| ---------------------- | ------ | ------------------------------------------------------------------------------ |
-| `GITHUB_CLIENT_ID`     | vars   | OAuth App の client ID                                                         |
-| `OAUTH_REDIRECT_URI`   | vars   | 3 で登録した callback URL（例: `https://tektite.pages.dev/api/auth/callback`） |
-| `GITHUB_CLIENT_SECRET` | secret | OAuth App の client secret                                                     |
-| `SESSION_SECRET`       | secret | 暗号化 Cookie の鍵（下記で生成）                                               |
-
-`SESSION_SECRET` は十分な長さの乱数を使う:
+**確認方法:**
 
 ```sh
-openssl rand -hex 32
+pnpm exec wrangler pages project list
 ```
 
-設定方法（本番環境の例）:
+`tektite` が一覧に表示されていれば OK。
+
+---
+
+## 2. Cloudflare API トークンの作成
+
+**手順:**
+
+1. ブラウザで **https://dash.cloudflare.com/profile/api-tokens** を開く
+2. **Create Token** → テンプレートの **「Edit Cloudflare Workers」** をクリック
+3. 権限（Permissions）が以下を含むことを確認:
+   - **Account → Cloudflare Pages → Edit**
+   - **Account → Cloudflare Workers Scripts → Edit**（テンプレートの既定）
+4. **Account Resources** でご自身のアカウント（All accounts でも可）を選択
+5. **Zone Resources は変更しない**（「Include → Any zone」のまま）。Pages のデプロイはアカウントレベルで完結するため、ゾーン権限は不要
+6. **Continue to summary → Create Token**
+7. 表示されたトークンを**コピーして保存**する（一度しか表示されない）
+
+**確認方法:** トークン文字列（`xxxx...` の長い英数字）が手元に保存されていれば OK。
+
+---
+
+## 3. Cloudflare アカウント ID の確認
+
+**手順:**
+
+1. **https://dash.cloudflare.com** を開く
+2. ダッシュボードに表示されている **アカウント ID**（32 文字の英数字）を控える
+   - または URL の `https://dash.cloudflare.com/<ここがアカウント ID>` の部分
+
+**確認方法:** 32 文字の英数字が手元にあれば OK。
+
+---
+
+## 4. GitHub リポジトリ secrets の設定（デプロイ用）
+
+**手順:**
+
+1. ブラウザで **https://github.com/<owner>/<repo>/settings/secrets/actions** を開く
+2. **New repository secret** をクリックし、以下 2 つを設定する:
+
+   | Secret 名               | 内容                                        |
+   | ----------------------- | ------------------------------------------- |
+   | `CLOUDFLARE_API_TOKEN`  | 手順 2 で作成した API トークン              |
+   | `CLOUDFLARE_ACCOUNT_ID` | 手順 3 で確認したアカウント ID              |
+
+3. それぞれ **Add secret** をクリック
+
+**補足:** 未設定の間は `.github/workflows/deploy.yml` がデプロイステップをスキップし、notice を残して正常終了する（CI 自体は失敗しない）。
+
+**確認方法:**
 
 ```sh
-# secrets（値は対話入力で渡され、ログに残らない）
-pnpm exec wrangler pages secret put GITHUB_CLIENT_SECRET
-pnpm exec wrangler pages secret put SESSION_SECRET
+gh secret list
 ```
 
-vars は `wrangler.jsonc` の `"vars"` フィールドに書く方法と、Cloudflare ダッシュボード（Pages → Settings → Environment variables）で設定する方法がある。プレビュー環境と本番で `OAUTH_REDIRECT_URI` / `GITHUB_CLIENT_ID` を切り替える場合は、ダッシュボードの environment 別設定が扱いやすい。
+`CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` が表示されていれば OK。
 
-設定が不足していてもアプリは壊れない: 未ログイン表示になり、ログイン押下時に `auth_not_configured` エラー（HTTP 500）として表面化する。
+---
 
-## 5. ローカル開発
+## 5. GitHub OAuth App の作成
+
+**手順:**
+
+1. ブラウザで **https://github.com/settings/developers** を開く
+2. **OAuth Apps** → **New OAuth App** をクリック
+3. 以下を入力する:
+
+   | 項目                       | 値                                            |
+   | -------------------------- | --------------------------------------------- |
+   | Application name           | 任意（例: `tektite`）                         |
+   | Homepage URL               | `https://tektite.pages.dev`                   |
+   | Authorization callback URL | `https://tektite.pages.dev/api/auth/callback` |
+
+4. **Register application** をクリック
+5. 作成後の画面で:
+   - **Client ID** を控える
+   - **Generate a new client secret** をクリックして発行し、**Client secret** を控える（この画面でしか発行できない）
+
+**注意（redirect URI の制限）:** GitHub OAuth App はワイルドカードの redirect URI を登録できない。Cloudflare Pages のプレビュー環境（`https://<hash>.<project>.pages.dev`）ごとに callback URL が変わるため、プレビュー環境でもログインを検証したい場合は**プレビュー環境ごとに別の OAuth App を作成**し、環境変数を切り替えること。個人利用では**本番（`tektite.pages.dev`）専用**にするのが簡単。
+
+**確認方法:** Client ID と Client secret の両方が手元にあれば OK。
+
+---
+
+## 6. Cloudflare Pages の環境変数設定（認証用）
+
+Pages Functions が読む環境変数（`functions/api/auth/_lib/env.ts` が参照。`functions/env.d.ts` 対応表）:
+
+| キー                   | 内容                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `GITHUB_CLIENT_ID`     | 手順 5 で控えた Client ID                                                      |
+| `OAUTH_REDIRECT_URI`   | `https://tektite.pages.dev/api/auth/callback`（手順 5 で登録した callback URL）|
+| `GITHUB_CLIENT_SECRET` | 手順 5 で発行した Client secret                                                |
+| `SESSION_SECRET`       | 暗号化 Cookie の鍵（下記で生成）                                               |
+
+**手順:**
+
+1. `SESSION_SECRET` 用の乱数を生成する:
+
+   ```sh
+   openssl rand -hex 32
+   ```
+
+2. ブラウザで **https://dash.cloudflare.com** → **Workers & Pages** → **tektite** → **Settings** → **Environment variables** を開く
+3. プロジェクトが wrangler 管理（`wrangler.jsonc`）の場合、ダッシュボードには「シークレットのみ管理できます」と表示される。**その場合は 4 つすべてをシークレットとして設定してよい**（実装は vars / secrets を区別せず `env.X` で読むため、どちらでも動作する）
+4. **Secrets タブ** → **Add secret** で以下 4 つを追加する:
+
+   | キー                   | 値                                        |
+   | ---------------------- | ----------------------------------------- |
+   | `GITHUB_CLIENT_ID`     | 手順 5 の Client ID                       |
+   | `OAUTH_REDIRECT_URI`   | `https://tektite.pages.dev/api/auth/callback` |
+   | `GITHUB_CLIENT_SECRET` | 手順 5 の Client secret                   |
+   | `SESSION_SECRET`       | 手順 1 で生成した乱数                     |
+
+5. **Save** をクリック
+
+**補足:**
+- vars として設定したい場合は、`wrangler.jsonc` の `"vars"` フィールドに書く方法もある（プレビュー環境と本番で `OAUTH_REDIRECT_URI` / `GITHUB_CLIENT_ID` を切り替える場合は、ダッシュボードの environment 別設定が扱いやすい）
+- 設定が不足していてもアプリは壊れない: 未ログイン表示になり、ログイン押下時に `auth_not_configured` エラー（HTTP 500）として表面化する
+
+**確認方法:**
+
+```sh
+# デプロイ後に login エンドポイントが GitHub へリダイレクトすれば認証設定は成功
+curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}\n" https://tektite.pages.dev/api/auth/login
+# 例: 302 -> https://github.com/login/oauth/authorize?client_id=...
+```
+
+---
+
+## 7. ローカル開発
+
+**手順:**
 
 ```sh
 cp .dev.vars.example .dev.vars
@@ -98,12 +188,67 @@ pnpm exec playwright install chromium
 
 E2E は `features/**/*.feature`（受け入れ基準の Gherkin）を playwright-bdd で生成して実行する。モックサーバーと `wrangler pages dev`（`--binding` でテスト用の OAuth 値を注入）を自動起動するため、`.dev.vars` の設定が無くても動く。
 
-## 6. CI とデプロイ
+---
+
+## 8. デプロイと動作確認
+
+### デプロイの実行
+
+- **自動デプロイ**: `main` への push で `.github/workflows/deploy.yml` が実行され、`pnpm deploy`（`wrangler pages deploy`）で Cloudflare Pages へ自動デプロイされる
+- **手動デプロイ**: secrets 設定後に push をせずに再実行したい場合:
+
+  ```sh
+  gh workflow run deploy.yml --repo <owner>/<repo> --ref main
+  ```
+
+  実行状況の確認:
+
+  ```sh
+  gh run list --workflow deploy.yml --limit 1
+  ```
+
+- デプロイの実行ログからデプロイ URL が確認できる:
+
+  ```sh
+  gh run view <run-id> --log | grep "pages.dev"
+  # 例: ✨ Deployment complete! Take a peek over at https://afd67706.tektite.pages.dev
+  ```
+
+### 動作確認（推奨チェックリスト）
+
+1. **本番 URL が 200 を返す**:
+
+   ```sh
+   curl -s -o /dev/null -w "%{http_code}\n" https://tektite.pages.dev
+   # 200
+   ```
+
+2. **ヘルスチェックが OK**:
+
+   ```sh
+   curl -s https://tektite.pages.dev/api/health
+   # {"status":"ok","service":"tektite"}
+   ```
+
+3. **OAuth ログインが GitHub へリダイレクトする**:
+
+   ```sh
+   curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}\n" https://tektite.pages.dev/api/auth/login
+   # 302 -> https://github.com/login/oauth/authorize?client_id=...
+   ```
+
+4. **ブラウザでログイン → Vault 選択 → ノート編集 → 保存** まで一通り動作することを確認する
+
+デプロイ先 URL は Cloudflare Pages が発行する `https://tektite.pages.dev`（プロジェクト名は `wrangler.jsonc` の `name`）。プレビュー環境（コミットごとの `*.pages.dev` URL）は手順 5 の注意（redirect URI の制限）に従い、OAuth App の登録が必要になる。
+
+---
+
+## 9. CI と検収
 
 GitHub Actions が push / PR で以下を実行する:
 
 - `.github/workflows/ci.yml`: `pnpm lint` + `pnpm format:check` + `pnpm typecheck` + `pnpm test`（ユニット）+ `pnpm build` + `pnpm test:e2e`（Gherkin 全シナリオ）。E2E は `pnpm exec playwright install --with-deps chromium` でブラウザを導入してから実行する。対象ブランチは `main` と `tektite-wt-*`、および全 PR
-- `.github/workflows/deploy.yml`: `main` への push で `pnpm deploy`（`wrangler pages deploy`）により Cloudflare Pages へ自動デプロイする。2 節のシークレットが未設定の間はデプロイをスキップして正常終了する（CI は失敗しない）
+- `.github/workflows/deploy.yml`: 手順 8 参照（手順 4 のシークレットが未設定の間はデプロイをスキップして正常終了する）
 
 ローカルの検収手順（CI と同じチェック）:
 
@@ -111,4 +256,4 @@ GitHub Actions が push / PR で以下を実行する:
 pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e
 ```
 
-デプロイ先 URL は Cloudflare Pages が発行する `https://tektite.pages.dev`（プロジェクト名は `wrangler.jsonc` の `name`）。プレビュー環境（コミットごとの `*.pages.dev` URL）は 3 節の注意（redirect URI の制限）に従い、OAuth App の登録が必要になる。
+CI の実行状況は GitHub の **Actions** タブ、または `gh run list` で確認できる。
