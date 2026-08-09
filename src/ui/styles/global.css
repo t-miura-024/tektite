@@ -2076,3 +2076,29 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.vault-workspace-shell .file-tree-toolbar {
+  display: flex;
+  gap: 4px;
+}
+
+.vault-workspace-shell .file-tree-toolbar .button-secondary {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px;
+  font-size: 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.vault-workspace-shell .file-tree-toolbar [data-testid='file-create-note-button']::before {
+  content: '+';
+  font-size: 18px;
+  line-height: 1;
+}
+
+.vault-workspace-shell .file-tree-toolbar [data-testid='file-create-directory-button']::before {
+  content: '▧';
+  font-size: 16px;
+  line-height: 1;
+}
