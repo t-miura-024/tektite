@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 
 import { applyFileOperation } from '@/application/file';
 import type { FileOperation } from '@/application/file';
@@ -25,7 +26,7 @@ import type { NoteIndex } from '@/application/note-index';
 import { createNoteSearcher } from '@/application/search';
 import type { NoteSearcher, SearchableNote } from '@/application/search';
 import { openVault } from '@/application/vault';
-import { run } from '@/composition';
+import { run, slugify } from '@/composition';
 import { buildNotationIndex } from '@/domain/notation/index';
 import type { VaultNotationIndex } from '@/domain/notation/index';
 import type { TreeDirectory, VaultTree } from '@/domain/tree';
@@ -67,6 +68,23 @@ function collectFilePaths(root: TreeDirectory): string[] {
   return paths;
 }
 
+interface OutlineHeading {
+  readonly level: number;
+  readonly text: string;
+  readonly slug: string;
+}
+
+function collectOutline(content: string): readonly OutlineHeading[] {
+  return content.split('\n').flatMap((line) => {
+    const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (match === null) {
+      return [];
+    }
+    const text = match[2] ?? '';
+    return [{ level: match[1]?.length ?? 1, text, slug: slugify(text) }];
+  });
+}
+
 export interface VaultScreenProps {
   vaultRef: VaultRef;
   /** 選択中のノートパス（ツリー画面では null） */
@@ -101,6 +119,9 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   const [searchOpen, setSearchOpen] = useState(false);
   /** クイックスイッチャーの開閉（Cmd+O / Ctrl+O と移動ボタンから操作する）（M3） */
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [rightPanel, setRightPanel] = useState<'outline' | 'backlinks'>('outline');
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -189,6 +210,14 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   const notePaths = useMemo<readonly string[] | null>(
     () => (noteIndex === null ? null : [...noteIndex.notes.keys()]),
     [noteIndex],
+  );
+
+  const outline = useMemo(
+    () =>
+      notePath === null || noteIndex === null
+        ? []
+        : collectOutline(noteIndex.notes.get(notePath)?.content ?? ''),
+    [noteIndex, notePath],
   );
 
   // Cmd+K / Ctrl+K: 全文検索パネルの開閉。Cmd+O / Ctrl+O: クイックスイッチャーの
@@ -324,9 +353,17 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   };
 
   return (
-    <div className="vault-screen">
+    <div
+      className={`vault-screen${leftSidebarOpen ? '' : ' is-left-collapsed'}${rightSidebarOpen ? '' : ' is-right-collapsed'}`}
+    >
       <nav className="workspace-rail" aria-label="ワークスペース">
-        <button type="button" className="workspace-rail-button is-active" aria-label="ファイル">
+        <button
+          type="button"
+          className={`workspace-rail-button${leftSidebarOpen ? ' is-active' : ''}`}
+          aria-label="ファイル"
+          aria-pressed={leftSidebarOpen}
+          onClick={() => setLeftSidebarOpen((open) => !open)}
+        >
           ▣
         </button>
         <button
@@ -341,107 +378,115 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           ♡
         </button>
         <span className="workspace-rail-spacer" />
-        <button type="button" className="workspace-rail-button" aria-label="設定">
+        <button
+          type="button"
+          className={`workspace-rail-button${rightSidebarOpen ? ' is-active' : ''}`}
+          aria-label="右サイドバー"
+          aria-pressed={rightSidebarOpen}
+          onClick={() => setRightSidebarOpen((open) => !open)}
+        >
           ⚙
         </button>
       </nav>
-      <aside className="vault-sidebar">
-        <div className="vault-sidebar-header">
-          <Link to="/" className="vault-back-link">
-            ← Vault 一覧
-          </Link>
-          <h2 className="vault-title">{vaultRefFullName(vaultRef)}</h2>
-          <div className="vault-header-actions">
-            <button
-              type="button"
-              className="button-secondary search-open-button"
-              onClick={() => setSearchOpen(true)}
-            >
-              検索 <span className="search-open-shortcut">⌘K</span>
-            </button>
-            <button
-              type="button"
-              className="button-secondary search-open-button"
-              onClick={() => setQuickSwitchOpen(true)}
-            >
-              移動 <span className="search-open-shortcut">⌘O</span>
-            </button>
+      {leftSidebarOpen && (
+        <aside className="vault-sidebar">
+          <div className="vault-sidebar-header">
+            <Link to="/" className="vault-back-link">
+              ← Vault 一覧
+            </Link>
+            <h2 className="vault-title">{vaultRefFullName(vaultRef)}</h2>
+            <div className="vault-header-actions">
+              <button
+                type="button"
+                className="button-secondary search-open-button"
+                onClick={() => setSearchOpen(true)}
+              >
+                検索 <span className="search-open-shortcut">⌘K</span>
+              </button>
+              <button
+                type="button"
+                className="button-secondary search-open-button"
+                onClick={() => setQuickSwitchOpen(true)}
+              >
+                移動 <span className="search-open-shortcut">⌘O</span>
+              </button>
+            </div>
           </div>
-        </div>
-        {state.kind === 'loading' && (
-          <p className="app-placeholder" role="status">
-            ツリーを読み込み中…
-          </p>
-        )}
-        {state.kind === 'error' && (
-          <div className="error-panel">
-            <p>{state.message}</p>
-            <button type="button" className="button-secondary" onClick={() => void load()}>
-              再試行
-            </button>
-          </div>
-        )}
-        {state.kind === 'ready' && (
-          <>
-            <p className="vault-branch">ブランチ: {state.tree.defaultBranch}</p>
-            {state.tree.truncated && (
-              <p className="tree-truncated-notice">
-                リポジトリが大きいため、一部のファイルのみ表示しています。
-              </p>
-            )}
-            {noteIndex !== null && noteIndex.truncated && (
-              <p className="tree-truncated-notice" role="status">
-                リポジトリが大きいため、一部のノートのみ索引化しています（検索・移動・タグ・バックリンクは不完全です）。
-              </p>
-            )}
-            <FileTree
-              root={state.tree.root}
-              vaultRef={vaultRef}
-              expandedPaths={expandedPaths}
-              selectedPath={notePath}
-              onToggleDirectory={toggleDirectory}
-              onCreateNote={(noteName) =>
-                void runFileOperation(
-                  { kind: 'create-note', path: noteName },
-                  fileOperationMessages['create-note'],
-                )
-              }
-              onCreateDirectory={(directoryName) =>
-                void runFileOperation(
-                  { kind: 'create-directory', path: directoryName },
-                  fileOperationMessages['create-directory'],
-                )
-              }
-              onRename={(path, type, newName) =>
-                void runFileOperation(
-                  {
-                    kind: type === 'file' ? 'rename-note' : 'rename-directory',
-                    from: path,
-                    to: joinDirectoryPath(parentDirectoryPath(path), newName),
-                  },
-                  fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
-                )
-              }
-              onMove={(path, type, targetDirectory) =>
-                void runFileOperation(
-                  {
-                    kind: type === 'file' ? 'rename-note' : 'rename-directory',
-                    from: path,
-                    to: joinDirectoryPath(targetDirectory, pathBaseName(path)),
-                  },
-                  fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
-                )
-              }
-              onDelete={(path, type) =>
-                void runFileOperation(
-                  { kind: type === 'file' ? 'delete-note' : 'delete-directory', path },
-                  fileOperationMessages[type === 'file' ? 'delete-note' : 'delete-directory'],
-                )
-              }
-            />
-          </>
-        )}
-      </aside>
+          {state.kind === 'loading' && (
+            <p className="app-placeholder" role="status">
+              ツリーを読み込み中…
+            </p>
+          )}
+          {state.kind === 'error' && (
+            <div className="error-panel">
+              <p>{state.message}</p>
+              <button type="button" className="button-secondary" onClick={() => void load()}>
+                再試行
+              </button>
+            </div>
+          )}
+          {state.kind === 'ready' && (
+            <>
+              <p className="vault-branch">ブランチ: {state.tree.defaultBranch}</p>
+              {state.tree.truncated && (
+                <p className="tree-truncated-notice">
+                  リポジトリが大きいため、一部のファイルのみ表示しています。
+                </p>
+              )}
+              {noteIndex !== null && noteIndex.truncated && (
+                <p className="tree-truncated-notice" role="status">
+                  リポジトリが大きいため、一部のノートのみ索引化しています（検索・移動・タグ・バックリンクは不完全です）。
+                </p>
+              )}
+              <FileTree
+                root={state.tree.root}
+                vaultRef={vaultRef}
+                expandedPaths={expandedPaths}
+                selectedPath={notePath}
+                onToggleDirectory={toggleDirectory}
+                onCreateNote={(noteName) =>
+                  void runFileOperation(
+                    { kind: 'create-note', path: noteName },
+                    fileOperationMessages['create-note'],
+                  )
+                }
+                onCreateDirectory={(directoryName) =>
+                  void runFileOperation(
+                    { kind: 'create-directory', path: directoryName },
+                    fileOperationMessages['create-directory'],
+                  )
+                }
+                onRename={(path, type, newName) =>
+                  void runFileOperation(
+                    {
+                      kind: type === 'file' ? 'rename-note' : 'rename-directory',
+                      from: path,
+                      to: joinDirectoryPath(parentDirectoryPath(path), newName),
+                    },
+                    fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
+                  )
+                }
+                onMove={(path, type, targetDirectory) =>
+                  void runFileOperation(
+                    {
+                      kind: type === 'file' ? 'rename-note' : 'rename-directory',
+                      from: path,
+                      to: joinDirectoryPath(targetDirectory, pathBaseName(path)),
+                    },
+                    fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
+                  )
+                }
+                onDelete={(path, type) =>
+                  void runFileOperation(
+                    { kind: type === 'file' ? 'delete-note' : 'delete-directory', path },
+                    fileOperationMessages[type === 'file' ? 'delete-note' : 'delete-directory'],
+                  )
+                }
+              />
+            </>
+          )}
+        </aside>
+      )}
       <section className="vault-content">
         <div className="workspace-tabs" role="tablist" aria-label="開いているノート">
           <div className="workspace-tab is-active" role="tab" aria-selected="true">
@@ -483,30 +528,67 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           <span>⌘O クイックスイッチャー</span>
         </footer>
       </section>
-      <aside className="workspace-right-sidebar" aria-label="補助ペイン">
-        <div className="workspace-right-tabs" role="tablist" aria-label="補助ペイン">
-          <button type="button" className="is-active" role="tab" aria-selected="true">
-            アウトライン
-          </button>
-          <button type="button" role="tab" aria-selected="false">
-            バックリンク
-          </button>
-        </div>
-        {notation !== null && (
-          <>
+      {rightSidebarOpen && (
+        <aside className="workspace-right-sidebar" aria-label="補助ペイン">
+          <div className="workspace-right-tabs" role="tablist" aria-label="補助ペイン">
+            <button
+              type="button"
+              className={rightPanel === 'outline' ? 'is-active' : ''}
+              role="tab"
+              aria-selected={rightPanel === 'outline'}
+              onClick={() => setRightPanel('outline')}
+            >
+              アウトライン
+            </button>
+            <button
+              type="button"
+              className={rightPanel === 'backlinks' ? 'is-active' : ''}
+              role="tab"
+              aria-selected={rightPanel === 'backlinks'}
+              onClick={() => setRightPanel('backlinks')}
+            >
+              バックリンク
+            </button>
+          </div>
+          {rightPanel === 'outline' && (
+            <nav className="workspace-outline" aria-label="アウトライン">
+              {outline.length === 0 ? (
+                <p className="app-placeholder">見出しがありません。</p>
+              ) : (
+                outline.map((heading) => (
+                  <Link
+                    key={`${heading.slug}-${heading.level}`}
+                    to={`${noteRoutePath(vaultRef, notePath ?? '')}#${heading.slug}`}
+                    className="workspace-outline-link"
+                    style={{ '--outline-level': heading.level } as CSSProperties}
+                  >
+                    {heading.text}
+                  </Link>
+                ))
+              )}
+            </nav>
+          )}
+          {rightPanel === 'backlinks' && notation !== null && (
+            <>
+              {notePath !== null && (
+                <section className="vault-sidebar-section" aria-label="バックリンク">
+                  <h3 className="vault-sidebar-section-title">バックリンク</h3>
+                  <BacklinkPanel
+                    vaultRef={vaultRef}
+                    links={notation.backlinks.get(notePath) ?? []}
+                  />
+                </section>
+              )}
+            </>
+          )}
+          {rightPanel === 'backlinks' && notation !== null && (
             <section className="vault-sidebar-section" aria-label="タグ一覧">
               <h3 className="vault-sidebar-section-title">タグ</h3>
               <TagPanel vaultRef={vaultRef} tagIndex={notation.tagIndex} notes={notation.notes} />
             </section>
-            {notePath !== null && (
-              <section className="vault-sidebar-section" aria-label="バックリンク">
-                <h3 className="vault-sidebar-section-title">バックリンク</h3>
-                <BacklinkPanel vaultRef={vaultRef} links={notation.backlinks.get(notePath) ?? []} />
-              </section>
-            )}
-          </>
-        )}
-      </aside>
+          )}
+        </aside>
+      )}
       {searchOpen && (
         <SearchPanel
           vaultRef={vaultRef}
