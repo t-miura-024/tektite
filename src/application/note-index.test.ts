@@ -183,4 +183,18 @@ describe('ノート索引レジストリ', () => {
     }
     expect(registry.get(REF)).toBeNull();
   });
+
+  it('applyFileChanges の create-binary（画像）はノート索引に混ぜない', async () => {
+    const registry = createNoteIndexRegistry();
+    const gateway = mockGateway();
+    await Effect.runPromise(Effect.provide(loadNoteIndex(REF), provide(registry, gateway)));
+
+    const next = registry.applyFileChanges(REF, [
+      { op: 'create-binary', path: 'attachments/20260809-123456-ab12.png', base64: 'AAAA' },
+    ]);
+
+    // 添付は検索・クイックスイッチャーの対象外（既存ノートは残る）
+    expect(next?.notes.has('attachments/20260809-123456-ab12.png')).toBe(false);
+    expect(next?.notes.has('README.md')).toBe(true);
+  });
 });

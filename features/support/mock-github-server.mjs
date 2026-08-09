@@ -90,6 +90,19 @@ const REPOS = [
     owner: { login: 'octocat' },
     permissions: { admin: true, push: true, pull: true },
   },
+  {
+    id: 5,
+    name: 'empty-vault',
+    full_name: 'octocat/empty-vault',
+    private: false,
+    archived: false,
+    default_branch: 'main',
+    description: 'コミット 0 件の空リポジトリ（「最初のノートを作成」CTA 用）',
+    pushed_at: '2026-08-09T00:00:00Z',
+    updated_at: '2026-08-09T00:00:00Z',
+    owner: { login: 'octocat' },
+    permissions: { admin: true, push: true, pull: true },
+  },
 ];
 
 const REPO_BY_FULL_NAME = new Map(REPOS.map((repo) => [repo.full_name, repo]));
@@ -198,6 +211,18 @@ const COMMITS = new Map();
 
 /** ブランチ先頭コミット sha（キーは "owner/repo:branch"。初回アクセス時に確定する） */
 const HEAD_COMMITS = new Map();
+
+/** パス拡張子から Content-Type を推測する（画像 round-trip の raw 配信用） */
+function contentTypeForPath(path) {
+  const lower = path.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.svg')) return 'image/svg+xml';
+  if (lower.endsWith('.md')) return 'text/markdown';
+  return 'application/octet-stream';
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -363,7 +388,8 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // ブランチ先頭コミットの取得（一括コミットの parents 解決用）
+  // ブランチ先頭コミットの取得（一括コミットの parents 解決用）。
+  // コミット 0 件のリポジトリ（TREES 未定義）は GitHub 同様 404 を返す
   const refMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/ref\/heads\/([^/]+)$/);
   if (req.method === 'GET' && refMatch) {
     if (!requireToken(req, res)) {
@@ -371,6 +397,10 @@ const server = createServer(async (req, res) => {
     }
     const branch = decodeURIComponent(refMatch[3] ?? '');
     const key = `${refMatch[1]}/${refMatch[2]}:${branch}`;
+    if (TREES[key] === undefined) {
+      sendJson(res, 404, { message: 'Not Found' });
+      return;
+    }
     const sha = HEAD_COMMITS.get(key) ?? `mock-commit-${key}`;
     HEAD_COMMITS.set(key, sha);
     sendJson(res, 200, {
@@ -395,6 +425,11 @@ const server = createServer(async (req, res) => {
     const owner = treePostMatch[1];
     const repo = treePostMatch[2];
     const treeKey = `${owner}/${repo}:main`;
+    // 空リポジトリの初回コミット（TREES 未定義）ではエントリ配列を初期化する
+    // （以降の trees / ref 取得が 404 にならないようにする）
+    if (TREES[treeKey] === undefined) {
+      TREES[treeKey] = [];
+    }
     // 1) 追加エントリ（sha あり）を先に適用する。BLOBS にあれば新規本文、
     //    なければ同じ sha の既存 NOTES から引き継ぐ（move の内容保持）
     for (const entry of body.tree) {
@@ -404,9 +439,13 @@ const server = createServer(async (req, res) => {
       const noteKey = `${owner}/${repo}:${entry.path}`;
       const blob = BLOBS.get(entry.sha);
       if (blob !== undefined) {
+        // バイナリ（画像）の round-trip 用に元の base64 と Content-Type も保持する。
+        // raw 配信（Accept: application/vnd.github.raw）は rawContent をそのまま返す
         NOTES[noteKey] = {
           sha: entry.sha,
           content: Buffer.from(blob, 'base64').toString('utf8'),
+          rawContent: blob,
+          contentType: contentTypeForPath(entry.path),
         };
       } else {
         const existing = Object.entries(NOTES).find(([, note]) => note.sha === entry.sha);
@@ -464,12 +503,20 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // ブランチ参照の更新（一括コミットの最後。force は無視して成功させる）
+  // ブランチ参照の更新（一括コミットの最後。force は無視して成功させる）。
+  // ref 未作成（コミット 0 件）のリポジトリは GitHub 同様 404 を返し、
+  // クライアント（commit.ts）が POST /git/refs で新規作成する
   const refsPatchMatch = url.pathname.match(
     /^\/repos\/([^/]+)\/([^/]+)\/git\/refs\/heads\/([^/]+)$/,
   );
   if (req.method === 'PATCH' && refsPatchMatch) {
     if (!requireToken(req, res)) {
+      return;
+    }
+    const branch = decodeURIComponent(refsPatchMatch[3] ?? '');
+    const key = `${refsPatchMatch[1]}/${refsPatchMatch[2]}:${branch}`;
+    if (!HEAD_COMMITS.has(key)) {
+      sendJson(res, 404, { message: 'Not Found' });
       return;
     }
     const raw = await readBody(req);
@@ -478,10 +525,36 @@ const server = createServer(async (req, res) => {
       sendJson(res, 400, { message: 'sha is required' });
       return;
     }
-    const branch = decodeURIComponent(refsPatchMatch[3] ?? '');
-    HEAD_COMMITS.set(`${refsPatchMatch[1]}/${refsPatchMatch[2]}:${branch}`, body.sha);
+    HEAD_COMMITS.set(key, body.sha);
     sendJson(res, 200, {
       ref: `refs/heads/${branch}`,
+      object: { sha: body.sha, type: 'commit' },
+    });
+    return;
+  }
+
+  // ブランチ参照の新規作成（空リポジトリの初回コミットで使用）。
+  // body: { ref: 'refs/heads/main', sha }
+  const refsPostMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/refs$/);
+  if (req.method === 'POST' && refsPostMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    if (typeof body.ref !== 'string' || typeof body.sha !== 'string') {
+      sendJson(res, 400, { message: 'ref and sha are required' });
+      return;
+    }
+    const branch = body.ref.replace(/^refs\/heads\//, '');
+    const key = `${refsPostMatch[1]}/${refsPostMatch[2]}:${branch}`;
+    if (HEAD_COMMITS.has(key)) {
+      sendJson(res, 422, { message: 'Reference already exists' });
+      return;
+    }
+    HEAD_COMMITS.set(key, body.sha);
+    sendJson(res, 201, {
+      ref: body.ref,
       object: { sha: body.sha, type: 'commit' },
     });
     return;

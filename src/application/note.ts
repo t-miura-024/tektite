@@ -103,6 +103,8 @@ export interface NoteSaveRequest {
  * 一括コミットの変更 1 件（M5: ファイル操作）。
  *
  * - create / update: path に本文（UTF-8）を置く。base64 化は infra 層が行う
+ * - create-binary: 画像などバイナリを標準 base64（btoa 互換）のまま置く
+ *   （UTF-8 テキスト経由にすると二重エンコードで壊れるため。M2 画像アップロード）
  * - delete: path のファイルを削除する（GitHub 上の実削除）
  * - move: from（path）を to へ移動する。本文は転送せず、サーバー側が base tree
  *   の blob sha を再利用する（添付ファイルなど本文をクライアントに持たない
@@ -110,6 +112,7 @@ export interface NoteSaveRequest {
  */
 export type FileChange =
   | { readonly op: 'create'; readonly path: string; readonly content: string }
+  | { readonly op: 'create-binary'; readonly path: string; readonly base64: string }
   | { readonly op: 'update'; readonly path: string; readonly content: string }
   | { readonly op: 'delete'; readonly path: string }
   | { readonly op: 'move'; readonly path: string; readonly to: string };

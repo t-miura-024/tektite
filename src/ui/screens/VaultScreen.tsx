@@ -39,6 +39,7 @@ import type { VaultRef } from '@/domain/vault';
 import { vaultRefFullName } from '@/domain/vault';
 
 import { BacklinkPanel } from '@/ui/components/BacklinkPanel';
+import { EmptyVaultCta } from '@/ui/components/EmptyVaultCta';
 import { FileTree } from '@/ui/components/FileTree';
 import { Link } from '@/ui/components/Link';
 import { NotePane } from '@/ui/components/NotePane';
@@ -442,6 +443,16 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             notify={notify}
             onSessionExpired={onSessionExpired}
             onNoteSaved={handleNoteSaved}
+            onFileChanged={() => void load()}
+          />
+        ) : state.kind === 'ready' && state.tree.root.children.length === 0 ? (
+          <EmptyVaultCta
+            onCreateNote={(noteName) =>
+              void runFileOperation(
+                { kind: 'create-note', path: noteName },
+                fileOperationMessages['create-note'],
+              )
+            }
           />
         ) : (
           <p className="app-placeholder">ツリーからファイルを選択してください。</p>

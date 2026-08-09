@@ -116,6 +116,9 @@ export function createNoteIndexRegistry(): NoteIndexRegistry {
             notes.set(change.to, { path: change.to, sha: '', content: source.content });
           }
           notes.delete(change.path);
+        } else if (change.op === 'create-binary') {
+          // 添付（画像）はノート索引の対象外（検索・クイックスイッチャーに混ぜない）
+          notes.delete(change.path);
         } else {
           notes.set(change.path, { path: change.path, sha: '', content: change.content });
         }

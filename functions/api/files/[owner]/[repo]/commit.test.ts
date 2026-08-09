@@ -65,6 +65,8 @@ function mockGitHubSequence(
     refStatus?: number;
     updateRefStatus?: number;
     moveSourceMissing?: boolean;
+    /** 空リポジトリ（ref / trees が 404、refs PATCH も 404 → POST refs で作成） */
+    emptyRepo?: boolean;
   } = {},
 ) {
   const treeEntries = overrides.moveSourceMissing
@@ -81,11 +83,18 @@ function mockGitHubSequence(
       }
       // GET は /git/ref/（単数）、PATCH は /git/refs/（複数）が GitHub API の規約
       if (path === '/repos/octocat/notes/git/ref/heads/main') {
+        if (overrides.emptyRepo || overrides.refStatus === 404) {
+          return Promise.resolve(jsonResponse({ message: 'Not Found' }, 404));
+        }
         return Promise.resolve(
           jsonResponse({ ref: 'refs/heads/main', object: { sha: 'commit-head' } }),
         );
       }
       if (path === '/repos/octocat/notes/git/refs/heads/main') {
+        if (overrides.emptyRepo) {
+          // 初回コミット前は ref が存在しない（PATCH は 404）
+          return Promise.resolve(jsonResponse({ message: 'Not Found' }, 404));
+        }
         if (overrides.updateRefStatus === 409) {
           return Promise.resolve(
             jsonResponse({ message: 'reference is not fast-forwardable' }, 409),
@@ -95,12 +104,21 @@ function mockGitHubSequence(
           jsonResponse({ ref: 'refs/heads/main', object: { sha: 'commit-new' } }),
         );
       }
+      if (path === '/repos/octocat/notes/git/refs') {
+        // 空リポジトリの初回コミットは POST でブランチ参照を作成する
+        return Promise.resolve(
+          jsonResponse({ ref: 'refs/heads/main', object: { sha: 'commit-new' } }, 201),
+        );
+      }
       if (
         path === '/repos/octocat/notes/git/trees' ||
         path.startsWith('/repos/octocat/notes/git/trees/')
       ) {
         if (method === 'POST') {
           return Promise.resolve(jsonResponse({ sha: 'tree-new', tree: [] }));
+        }
+        if (overrides.emptyRepo) {
+          return Promise.resolve(jsonResponse({ message: 'Not Found' }, 404));
         }
         return Promise.resolve(
           jsonResponse({ sha: 'tree-base', truncated: false, tree: treeEntries }),
@@ -278,6 +296,57 @@ describe('POST /api/files/:owner/:repo/commit', () => {
 
     expect(response.status).toBe(409);
     expect(await readJson(response)).toEqual({ error: 'conflict' });
+  });
+
+  it('空リポジトリの初回コミットは parents / base_tree 無しで作る（M2）', async () => {
+    mockGitHubSequence({ emptyRepo: true });
+
+    const response = await onRequestPost(
+      postContext(
+        postRequest({
+          message: 'Create index.md',
+          changes: [{ op: 'create', path: 'index.md', content: btoa('# first note\n') }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toEqual({
+      owner: 'octocat',
+      name: 'notes',
+      branch: 'main',
+      commitSha: 'commit-new',
+    });
+
+    // 呼び出し: repo → ref(404) → trees(404) → blobs → trees(POST) → commits → refs(PATCH 404) → refs(POST)
+    const calls = mocks.githubApiFetch.mock.calls.map((call) => ({
+      path: call[1],
+      method: (call[3] as { method?: string } | undefined)?.method ?? 'GET',
+    }));
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      'GET /repos/octocat/notes',
+      'GET /repos/octocat/notes/git/ref/heads/main',
+      'GET /repos/octocat/notes/git/trees/main?recursive=1',
+      'POST /repos/octocat/notes/git/blobs',
+      'POST /repos/octocat/notes/git/trees',
+      'POST /repos/octocat/notes/git/commits',
+      'PATCH /repos/octocat/notes/git/refs/heads/main',
+      'POST /repos/octocat/notes/git/refs',
+    ]);
+
+    // 新 tree は base_tree を省略する（既存ツリーが無いため）
+    const treeBody = callBody(4);
+    expect(treeBody.base_tree).toBeUndefined();
+
+    // コミットは parents 無し（ルートコミット）
+    expect(callBody(5)).toEqual({
+      message: 'Create index.md',
+      tree: 'tree-new',
+      parents: [],
+    });
+
+    // ref は POST /git/refs で新規作成する（refs/heads/main）
+    expect(callBody(7)).toEqual({ ref: 'refs/heads/main', sha: 'commit-new' });
   });
 
   it('ボディ不正（未知の op / 不正パス / base64 でない content）は 400', async () => {

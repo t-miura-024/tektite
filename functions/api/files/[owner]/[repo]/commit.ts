@@ -20,6 +20,10 @@
  * ref 更新（force: false）。ref 更新が 409 の場合は楽観ロック競合として
  * `{ error: 'conflict' }` を返す（ノート保存の sha 楽観ロックと同系の防衛線）。
  *
+ * 空リポジトリ（コミット 0 件）対応（M2）: コミットが無いと ref / trees が 404 を
+ * 返すため、parents 無し・base_tree 無しの初回コミットとして扱う。ref 更新
+ * （PATCH）も 404 になるため、POST /git/refs でブランチ参照を新規作成する。
+ *
  * 応答:
  * - パラメータ不正                  → 400 { error: 'invalid_vault_ref' }
  * - ボディ不正                      → 400 { error: 'invalid_body' }
@@ -214,7 +218,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
   }
   const branch = repoInfo.default_branch;
 
-  // 2) ブランチ先頭コミットの sha を取得する（Commit 作成時の parents に使う）
+  // 2) ブランチ先頭コミットの sha を取得する（Commit 作成時の parents に使う）。
+  //    404 はコミット 0 件の空リポジトリ（初回コミット。parents 無しで作る）
   let refResponse: Response;
   try {
     refResponse = await githubApiFetch(
@@ -226,17 +231,22 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
     return githubUnreachable();
   }
   const refFailure = mapGithubFailure(refResponse);
-  if (refFailure) {
+  if (refFailure && refResponse.status !== 404) {
     return refFailure;
   }
-  const refBody = (await refResponse.json().catch(() => null)) as GithubRefResponse | null;
-  if (typeof refBody?.object?.sha !== 'string' || refBody.object.sha.length === 0) {
-    return Response.json({ error: 'github_error' }, { status: 502 });
+  let headCommitSha: string | null = null;
+  if (refResponse.status !== 404) {
+    const refBody = (await refResponse.json().catch(() => null)) as GithubRefResponse | null;
+    if (typeof refBody?.object?.sha !== 'string' || refBody.object.sha.length === 0) {
+      return Response.json({ error: 'github_error' }, { status: 502 });
+    }
+    headCommitSha = refBody.object.sha;
   }
-  const headCommitSha = refBody.object.sha;
+  const isFirstCommit = headCommitSha === null;
 
   // 3) base tree（パス → blob sha の対応）を取得する。move の本文引き継ぎと
-  //    新 tree の base_tree に使う（ref 名で Trees API を直接引ける）
+  //    新 tree の base_tree に使う（ref 名で Trees API を直接引ける）。
+  //    空リポジトリは 404 のため base tree 無し（base_tree を省略して作る）
   let treeResponse: Response;
   try {
     treeResponse = await githubApiFetch(
@@ -248,18 +258,25 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
     return githubUnreachable();
   }
   const treeFailure = mapGithubFailure(treeResponse);
-  if (treeFailure) {
+  if (treeFailure && treeResponse.status !== 404) {
     return treeFailure;
   }
-  const treeBody = (await treeResponse.json().catch(() => null)) as GithubTreeResponse | null;
-  if (typeof treeBody?.sha !== 'string' || !Array.isArray(treeBody.tree)) {
-    return Response.json({ error: 'github_error' }, { status: 502 });
-  }
-  const baseTreeSha = treeBody.sha;
+  let baseTreeSha: string | null = null;
   const blobShaByPath = new Map<string, string>();
-  for (const entry of treeBody.tree) {
-    if (entry.type === 'blob' && typeof entry.path === 'string' && typeof entry.sha === 'string') {
-      blobShaByPath.set(entry.path, entry.sha);
+  if (treeResponse.status !== 404) {
+    const treeBody = (await treeResponse.json().catch(() => null)) as GithubTreeResponse | null;
+    if (typeof treeBody?.sha !== 'string' || !Array.isArray(treeBody.tree)) {
+      return Response.json({ error: 'github_error' }, { status: 502 });
+    }
+    baseTreeSha = treeBody.sha;
+    for (const entry of treeBody.tree) {
+      if (
+        entry.type === 'blob' &&
+        typeof entry.path === 'string' &&
+        typeof entry.sha === 'string'
+      ) {
+        blobShaByPath.set(entry.path, entry.sha);
+      }
     }
   }
 
@@ -319,15 +336,17 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
     }
   }
 
-  // 5) 新 tree を作成する（base_tree を継承し、差分エントリを適用）
+  // 5) 新 tree を作成する（base_tree を継承し、差分エントリを適用。
+  //    空リポジトリの初回コミットは base_tree を省略する）
   let newTreeResponse: Response;
   try {
     newTreeResponse = await githubApiFetch(base, `/repos/${owner}/${repoName}/git/trees`, token, {
       method: 'POST',
-      body: JSON.stringify({
-        base_tree: baseTreeSha,
-        tree: [...delta.values()],
-      }),
+      body: JSON.stringify(
+        baseTreeSha === null
+          ? { tree: [...delta.values()] }
+          : { base_tree: baseTreeSha, tree: [...delta.values()] },
+      ),
     });
   } catch {
     return githubUnreachable();
@@ -341,7 +360,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
     return Response.json({ error: 'github_error' }, { status: 502 });
   }
 
-  // 6) コミットを作成する（parents はブランチ先頭コミットのみ）
+  // 6) コミットを作成する（parents はブランチ先頭コミットのみ。
+  //    空リポジトリの初回コミットは parents 無し）
   let commitResponse: Response;
   try {
     commitResponse = await githubApiFetch(base, `/repos/${owner}/${repoName}/git/commits`, token, {
@@ -349,7 +369,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
       body: JSON.stringify({
         message: body.message,
         tree: newTreeBody.sha,
-        parents: [headCommitSha],
+        parents: isFirstCommit ? [] : [headCommitSha],
       }),
     });
   } catch {
@@ -364,7 +384,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
     return Response.json({ error: 'github_error' }, { status: 502 });
   }
 
-  // 7) ブランチ参照を更新する（force: false。409 は楽観ロック競合として伝える）
+  // 7) ブランチ参照を更新する（force: false。409 は楽観ロック競合として伝える）。
+  //    空リポジトリの初回コミットは PATCH が 404（ref 未作成）になるため、
+  //    POST /git/refs で新規作成する
   let updateRefResponse: Response;
   try {
     updateRefResponse = await githubApiFetch(
@@ -382,9 +404,33 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request, params }
   if (updateRefResponse.status === 409) {
     return Response.json({ error: 'conflict' }, { status: 409 });
   }
-  const updateRefFailure = mapGithubFailure(updateRefResponse);
-  if (updateRefFailure) {
-    return updateRefFailure;
+  if (updateRefResponse.status === 404 && isFirstCommit) {
+    let createRefResponse: Response;
+    try {
+      createRefResponse = await githubApiFetch(
+        base,
+        `/repos/${owner}/${repoName}/git/refs`,
+        token,
+        {
+          method: 'POST',
+          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitBody.sha }),
+        },
+      );
+    } catch {
+      return githubUnreachable();
+    }
+    if (createRefResponse.status === 409) {
+      return Response.json({ error: 'conflict' }, { status: 409 });
+    }
+    const createRefFailure = mapGithubFailure(createRefResponse);
+    if (createRefFailure) {
+      return createRefFailure;
+    }
+  } else {
+    const updateRefFailure = mapGithubFailure(updateRefResponse);
+    if (updateRefFailure) {
+      return updateRefFailure;
+    }
   }
 
   return Response.json(

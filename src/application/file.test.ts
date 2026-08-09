@@ -8,7 +8,12 @@
 import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
-import { applyFileOperation } from '@/application/file';
+import {
+  applyFileOperation,
+  buildImagePath,
+  imageExtension,
+  uploadImage,
+} from '@/application/file';
 import type { FileOperation } from '@/application/file';
 import { FileCommitError, NoteGateway } from '@/application/note';
 import type { CommitChangesInput, NoteIndexData } from '@/application/note';
@@ -344,5 +349,124 @@ describe('applyFileOperation', () => {
       expect(result.left).toBeInstanceOf(FileCommitError);
       expect((result.left as FileCommitError).kind).toBe('conflict');
     }
+  });
+});
+
+// ---- M2: 画像アップロード ----
+
+/** 画像 base64 の固定値（1x1 PNG の base64。形式検証だけに使う） */
+const PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/** 成功系: 一括コミット（create-binary）と索引反映を検証する */
+async function runUpload(input: Parameters<typeof uploadImage>[1]) {
+  const registry = createNoteIndexRegistry();
+  const gateway = fakeGateway();
+  // Vault 表示中は索引が展開済みの想定（applyFileChanges の反映を確認するため）
+  await Effect.runPromise(Effect.provide(registry.load(REF), provide(registry, gateway)));
+  const result = await Effect.runPromise(
+    Effect.provide(uploadImage(REF, input), provide(registry, gateway)),
+  );
+  return { result, registry, gateway };
+}
+
+/** 失敗系: FiberFailure のラップを解除した FileCommitError を返す */
+async function runUploadEither(input: Parameters<typeof uploadImage>[1]) {
+  const registry = createNoteIndexRegistry();
+  const gateway = fakeGateway();
+  const result = await Effect.runPromise(
+    Effect.either(Effect.provide(uploadImage(REF, input), provide(registry, gateway))),
+  );
+  if (Either.isRight(result)) {
+    throw new Error('アップロードが成功してしまいました');
+  }
+  return { error: result.left, registry, gateway };
+}
+
+describe('uploadImage（画像アップロード）', () => {
+  it('画像を attachments/ の一意パスへ 1 コミットで保存し、パスを返す', async () => {
+    const { result, registry, gateway } = await runUpload({
+      fileName: 'screenshot.png',
+      base64: PNG_BASE64,
+    });
+
+    // パスは `attachments/YYYYMMDDHHMMSS-乱数.png` の一意形式
+    expect(result.path).toMatch(/^attachments\/\d{14}-[a-z0-9]{4}\.png$/);
+    expect(gateway.lastInput()).toEqual({
+      message: `Create ${result.path}`,
+      changes: [{ op: 'create-binary', path: result.path, base64: PNG_BASE64 }],
+    });
+    // 添付（画像）はノート索引に混ぜない
+    expect(registry.get(REF)?.notes.has(result.path)).toBe(false);
+    expect(registry.get(REF)?.notes.has('a.md')).toBe(true);
+  });
+
+  it('保存先ディレクトリを指定できる', async () => {
+    const { result } = await runUpload({
+      fileName: 'photo.jpg',
+      base64: PNG_BASE64,
+      directory: 'photos',
+    });
+    expect(result.path).toMatch(/^photos\/\d{14}-[a-z0-9]{4}\.jpg$/);
+  });
+
+  it('画像以外の拡張子は検証エラーになり、コミットしない', async () => {
+    const { error, gateway } = await runUploadEither({
+      fileName: 'note.md',
+      base64: PNG_BASE64,
+    });
+    expect(error).toBeInstanceOf(FileCommitError);
+    expect((error as FileCommitError).message).toBe('画像ファイル名が不正です。');
+    expect(gateway.lastInput()).toBeNull();
+  });
+
+  it('base64 でない画像データは検証エラーになる', async () => {
+    const { error, gateway } = await runUploadEither({
+      fileName: 'image.png',
+      base64: 'not base64!!!',
+    });
+    expect(error).toBeInstanceOf(FileCommitError);
+    expect((error as FileCommitError).message).toBe('画像データが不正です。');
+    expect(gateway.lastInput()).toBeNull();
+  });
+
+  it('コミット失敗（conflict）は FileCommitError として伝播する', async () => {
+    const registry = createNoteIndexRegistry();
+    const gateway = fakeGateway();
+    (gateway.commitChanges as ReturnType<typeof vi.fn>).mockReturnValue(
+      Effect.fail(new FileCommitError('conflict', 'ブランチが移動しました。')),
+    );
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.provide(
+          uploadImage(REF, { fileName: 'image.png', base64: PNG_BASE64 }),
+          provide(registry, gateway),
+        ),
+      ),
+    );
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect((result.left as FileCommitError).kind).toBe('conflict');
+    }
+  });
+});
+
+describe('画像パスの組み立て', () => {
+  it('imageExtension は画像拡張子を小文字で返す', () => {
+    expect(imageExtension('screenshot.PNG')).toBe('png');
+    expect(imageExtension('photo.jpeg')).toBe('jpeg');
+    expect(imageExtension('note.md')).toBeNull();
+    expect(imageExtension('image')).toBeNull();
+    expect(imageExtension('.gitignore')).toBeNull();
+  });
+
+  it('buildImagePath はタイムスタンプ + 乱数で一意なパスを作る', () => {
+    // 2026-08-09T12:34:56Z → 20260809123456
+    const timestamp = Date.UTC(2026, 7, 9, 12, 34, 56);
+    expect(buildImagePath('photo.png', 'attachments', timestamp, 'ab12')).toBe(
+      'attachments/20260809123456-ab12.png',
+    );
+    // 拡張子が画像でない場合は null
+    expect(buildImagePath('note.md', 'attachments', timestamp, 'ab12')).toBeNull();
   });
 });

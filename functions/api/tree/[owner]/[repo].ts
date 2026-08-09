@@ -113,6 +113,15 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request, params })
   }
   const treeFailure = mapGithubFailure(treeResponse);
   if (treeFailure) {
+    // コミットが 1 つもない空リポジトリは Trees API が 404 を返す（GitHub 実挙動）。
+    // リポジトリ自体は上で取得成功済みなので、空ツリーとして扱う
+    // （「最初のノートを作成」CTA の前提。M2）
+    if (treeResponse.status === 404) {
+      return Response.json(
+        { owner, name: repoName, defaultBranch, truncated: false, entries: [] },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
     return treeFailure;
   }
   const treeBody = (await treeResponse.json().catch(() => null)) as GithubTreeResponse | null;

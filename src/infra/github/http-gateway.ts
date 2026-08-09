@@ -368,12 +368,17 @@ export const NoteGatewayLive = Layer.succeed(NoteGateway, {
   commitChanges: (ref: VaultRef, input: CommitChangesInput) =>
     Effect.gen(function* () {
       const path = `/api/files/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/commit`;
-      // content は base64（/api/notes 保存と同じ規約）。move / delete は content なし
-      const changes: FileChange[] = input.changes.map((change) =>
-        change.op === 'create' || change.op === 'update'
+      // content は base64（/api/notes 保存と同じ規約）。create-binary は既に base64 の
+      // ためそのまま渡し、サーバーの 'create' として送る（UTF-8 経由にすると二重
+      // エンコードで画像が壊れる）。move / delete は content なし
+      const changes: FileChange[] = input.changes.map((change) => {
+        if (change.op === 'create-binary') {
+          return { op: 'create', path: change.path, content: change.base64 } as const;
+        }
+        return change.op === 'create' || change.op === 'update'
           ? { ...change, content: encodeBase64Content(change.content) }
-          : change,
-      );
+          : change;
+      });
       const body = yield* requestSave(path, { changes, message: input.message }, FileCommitError, {
         method: 'POST',
         conflictMessage: 'コミット前にリモートが変更されていました。',
