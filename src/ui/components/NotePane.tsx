@@ -52,6 +52,8 @@ export interface NotePaneProps {
    * VaultScreen が記法索引のキャッシュを更新するために使う（再取得なし）。
    */
   onNoteSaved?: (path: string, content: string) => void;
+  /** ノート本文を補助ペインのアウトラインへ渡す。 */
+  onNoteContentLoaded?: (content: string) => void;
   /**
    * 画像アップロード成功時に呼ばれる。VaultScreen がツリーを再読込して
    * 新しい添付ファイルをツリー・Embed 解決へ反映するために使う。
@@ -101,6 +103,7 @@ export function NotePane({
   notify,
   onSessionExpired,
   onNoteSaved,
+  onNoteContentLoaded,
   onFileChanged,
 }: NotePaneProps) {
   const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading' });
@@ -470,6 +473,7 @@ export function NotePane({
       shaRef.current = note.sha;
       contentRef.current = note.content;
       setEditorContent(note.content);
+      onNoteContentLoaded?.(note.content);
       readyRef.current = true;
       setLoadState({ kind: 'ready', note });
       // 未保存の変更（Draft）があれば復元通知を出す
@@ -487,7 +491,7 @@ export function NotePane({
       setLoadState({ kind: 'error', message });
       notify(message, { label: '再試行', onClick: () => void load() });
     }
-  }, [owner, name, notePath, notify, onSessionExpired]);
+  }, [owner, name, notePath, notify, onNoteContentLoaded, onSessionExpired]);
 
   // ノート切替時に旧ノートの本文が 1 フレーム表示されるのを防ぐため、load() の
   // loading 状態を paint 前に反映する（useEffect だと NoteEditor が key=notePath の

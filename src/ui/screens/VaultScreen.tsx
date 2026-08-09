@@ -122,6 +122,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [rightPanel, setRightPanel] = useState<'outline' | 'backlinks'>('outline');
+  const [outlineContent, setOutlineContent] = useState('');
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -212,13 +213,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     [noteIndex],
   );
 
-  const outline = useMemo(
-    () =>
-      notePath === null || noteIndex === null
-        ? []
-        : collectOutline(noteIndex.notes.get(notePath)?.content ?? ''),
-    [noteIndex, notePath],
-  );
+  const outline = useMemo(() => collectOutline(outlineContent), [outlineContent]);
 
   // Cmd+K / Ctrl+K: 全文検索パネルの開閉。Cmd+O / Ctrl+O: クイックスイッチャーの
   // 開閉（M3）。両パネルは同時に開かない（オーバーレイの重なりを避ける）。
@@ -261,8 +256,13 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   useEffect(() => {
     setNoteIndex(null);
     setIndexError(null);
+    setOutlineContent('');
     setExpandedPaths(new Set(['']));
   }, [owner, name]);
+
+  useEffect(() => {
+    setOutlineContent('');
+  }, [notePath]);
 
   // ツリー取得後: ルートを展開し、ノートパス指定があれば祖先ディレクトリも展開する
   // （ディープリンクのリロードで選択状態を復元するため）
@@ -507,6 +507,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             notify={notify}
             onSessionExpired={onSessionExpired}
             onNoteSaved={handleNoteSaved}
+            onNoteContentLoaded={setOutlineContent}
             onFileChanged={() => void load()}
           />
         ) : state.kind === 'ready' && state.tree.root.children.length === 0 ? (
