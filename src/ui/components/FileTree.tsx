@@ -454,7 +454,7 @@ function FileTreeNode({
           style={indent}
           onContextMenu={openMenuAt}
         >
-          {node.name}
+          <span className="file-tree-name">{node.name}</span>
         </Link>
       </li>
     );

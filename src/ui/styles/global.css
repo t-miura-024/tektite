@@ -2031,3 +2031,48 @@ body {
 .vault-workspace-shell .file-tree-toggle:hover {
   background: color-mix(in srgb, #a970ff 14%, transparent);
 }
+
+@media (min-width: 48rem) {
+  .vault-workspace-shell .vault-screen {
+    grid-template-columns: 2.75rem 12.5rem minmax(0, 1fr) 0;
+  }
+
+  .vault-workspace-shell .vault-screen:not(.is-right-collapsed) {
+    grid-template-columns: 2.75rem 12.5rem minmax(0, 1fr) minmax(13rem, 17rem);
+  }
+
+  .vault-workspace-shell .vault-screen.is-left-collapsed.is-right-collapsed {
+    grid-template-columns: 2.75rem 0 minmax(0, 1fr) 0;
+  }
+
+  .vault-workspace-shell .vault-screen.is-left-collapsed:not(.is-right-collapsed) {
+    grid-template-columns: 2.75rem 0 minmax(0, 1fr) minmax(13rem, 17rem);
+  }
+}
+
+.vault-workspace-shell .vault-sidebar {
+  padding-inline: 12px;
+}
+
+.vault-workspace-shell .file-tree,
+.vault-workspace-shell .file-tree-group,
+.vault-workspace-shell .file-tree-item,
+.vault-workspace-shell .file-tree-toggle,
+.vault-workspace-shell .file-tree-link {
+  min-width: 0;
+}
+
+.vault-workspace-shell .file-tree-toggle,
+.vault-workspace-shell .file-tree-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.vault-workspace-shell .file-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
