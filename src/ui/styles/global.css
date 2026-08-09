@@ -2001,6 +2001,14 @@ body {
   line-height: 16.9px;
 }
 
+.vault-workspace-shell .file-tree-toggle {
+  padding-inline-start: calc(8px + var(--tree-depth, 0) * 17px);
+}
+
+.vault-workspace-shell .file-tree-link {
+  padding-inline-start: calc(28px + var(--tree-depth, 0) * 17px);
+}
+
 .vault-workspace-shell .file-tree-caret {
   width: 1rem;
   color: #949fbe;
