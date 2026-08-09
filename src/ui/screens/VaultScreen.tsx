@@ -120,7 +120,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   /** クイックスイッチャーの開閉（Cmd+O / Ctrl+O と移動ボタンから操作する）（M3） */
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [rightPanel, setRightPanel] = useState<'outline' | 'backlinks'>('outline');
   const [outlineContent, setOutlineContent] = useState('');
 

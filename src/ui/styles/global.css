@@ -1726,3 +1726,60 @@ body {
   --color-accent: #a970ff;
   --color-accent-fg: #ffffff;
 }
+
+/* Reading view matches Obsidian's inline-title canvas rather than the editor toolbar. */
+.note-pane {
+  border: 0;
+  border-radius: 0;
+}
+
+.note-pane[data-mode='read'] .note-pane-header {
+  display: none;
+}
+
+.note-pane[data-mode='read'] .note-pane-body {
+  background: var(--color-bg);
+}
+
+.reading-view {
+  padding: 2.1rem 3.2rem 4rem;
+}
+
+.reading-inline-title {
+  margin: 0 0 1.4rem;
+  color: #ff5b5b;
+  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.reading-content {
+  max-width: none;
+  color: var(--color-fg-muted);
+  line-height: 1.75;
+}
+
+.reading-content h1,
+.reading-content h2,
+.reading-content h3,
+.reading-content h4,
+.reading-content h5,
+.reading-content h6 {
+  margin: 1.35rem 0 1rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-fg-muted) 25%, transparent);
+  color: #ff5b5b;
+  font-weight: 700;
+}
+
+.reading-content h1 {
+  font-size: 1.8rem;
+}
+
+.reading-content h2 {
+  font-size: 1.55rem;
+}
+
+.reading-content h3 {
+  font-size: 1.35rem;
+}

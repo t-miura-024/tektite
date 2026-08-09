@@ -512,7 +512,7 @@ export function NotePane({
   const statusKey = conflict !== null ? 'conflict' : saveStatus;
 
   return (
-    <div className="note-pane">
+    <div className="note-pane" data-mode={mode}>
       <header className="note-pane-header">
         <p className="note-pane-path" data-testid="note-path">
           {notePath}

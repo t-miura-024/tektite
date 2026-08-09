@@ -20,6 +20,7 @@ import { run } from '@/composition';
 import { collectEmbedContents, renderNoteMarkdown, sanitizeHtml, slugify } from '@/composition';
 import type { Frontmatter } from '@/domain/notation/parse';
 import { parseNotation } from '@/domain/notation/parse';
+import { pathBaseName } from '@/domain/tree';
 import type { VaultRef } from '@/domain/vault';
 import { navigate, noteRoutePath, NAVIGATE_EVENT_NAME } from '@/ui/router';
 import { isSessionExpiredError } from '@/ui/vault-error';
@@ -159,6 +160,7 @@ export function ReadingView({
 
   return (
     <div className="reading-view" data-testid="reading-view">
+      <h1 className="reading-inline-title">{pathBaseName(notePath).replace(/\.md$/i, '')}</h1>
       {frontmatter !== null && (
         <details className="note-frontmatter" data-testid="note-frontmatter">
           <summary className="note-frontmatter-summary">プロパティ</summary>
