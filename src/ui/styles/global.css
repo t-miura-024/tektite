@@ -1858,3 +1858,11 @@ body {
 .note-editor .cm-line:has(.tk-heading-1) {
   margin-block-start: 0.8rem;
 }
+
+.editor-inline-title {
+  margin: 2.1rem 3.2rem 1.4rem;
+  color: #ff5b5b;
+  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  font-weight: 700;
+  line-height: 1.15;
+}

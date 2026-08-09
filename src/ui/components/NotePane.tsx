@@ -29,6 +29,7 @@ import { run } from '@/composition';
 import type { EditorHandle } from '@/composition';
 import { slugify } from '@/composition';
 import type { VaultRef } from '@/domain/vault';
+import { pathBaseName } from '@/domain/tree';
 
 import { ConflictPanel } from '@/ui/components/ConflictPanel';
 import { NoteEditor } from '@/ui/components/NoteEditor';
@@ -593,6 +594,9 @@ export function NotePane({
           {/* エディタはモード切替でアンマウントせず非表示に保つ（編集中の内容と
               未保存状態を維持するため。表示モードへの切替時に blur が走り、
               既存ルールどおり自動保存される） */}
+          {mode === 'edit' && (
+            <h1 className="editor-inline-title">{pathBaseName(notePath).replace(/\.md$/i, '')}</h1>
+          )}
           <NoteEditor
             key={notePath}
             notePath={notePath}
