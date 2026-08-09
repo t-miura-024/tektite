@@ -511,6 +511,21 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             +
           </button>
         </div>
+        <div className="workspace-navigation" aria-label="ノートナビゲーション">
+          <button type="button" aria-label="戻る" onClick={() => window.history.back()}>
+            ‹
+          </button>
+          <button type="button" aria-label="進む" onClick={() => window.history.forward()}>
+            ›
+          </button>
+          <span />
+          <button type="button" aria-label="ノートを開く">
+            ◫
+          </button>
+          <button type="button" aria-label="その他の操作">
+            …
+          </button>
+        </div>
         {notePath !== null ? (
           <NotePane
             vaultRef={vaultRef}
