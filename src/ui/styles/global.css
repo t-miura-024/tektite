@@ -1727,6 +1727,48 @@ body {
   --color-accent-fg: #ffffff;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    --color-bg: #20212e;
+    --color-bg-subtle: #28293a;
+    --color-fg: #f2f3f5;
+    --color-fg-muted: #a7a9b8;
+    --color-border: #3b3d52;
+    --color-accent: #a970ff;
+    --color-accent-fg: #ffffff;
+  }
+}
+
+.app-header {
+  min-height: 2.35rem;
+  padding: 0.25rem 0.8rem;
+}
+
+.app-header h1 {
+  font-size: 0.9rem;
+}
+
+.session-controls {
+  gap: 0.55rem;
+}
+
+.session-login {
+  font-size: 0.72rem;
+}
+
+.session-controls .button-secondary {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.75rem;
+}
+
+.vault-screen {
+  min-height: calc(100vh - 2.35rem);
+}
+
+.vault-content {
+  min-height: calc(100vh - 2.35rem);
+}
+
 /* Reading view matches Obsidian's inline-title canvas rather than the editor toolbar. */
 .note-pane {
   border: 0;
