@@ -63,6 +63,13 @@ export function SearchPanel({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent): void => {
+    // 日本語 IME の変換中・変換確定の Enter（isComposing / keyCode 229）を
+    // パネル操作として解釈しない（変換確定の Enter で選択中の結果が誤って
+    // 開いてパネルが閉じるのを防ぐ。確定後の keydown は 229 で一度スキップされる）
+    // 注: React 合成イベントは isComposing をラップしないため nativeEvent を読む
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
       onClose();

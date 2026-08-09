@@ -22,6 +22,8 @@
  * sanitizeHtml（src/infra/render/sanitize）を通すこと。
  */
 
+import { noteDisplayName } from '@/application/note-name';
+
 import { Marked } from 'marked';
 import type { RendererObject, Token, TokenizerAndRendererExtension, Tokens } from 'marked';
 
@@ -220,12 +222,6 @@ function renderWikilink(span: WikiLinkSpan, options: RenderNotationOptions): str
 /** タグを <span class="tk-tag"> に変換する（クリック動作は MVP 対象外） */
 function renderTag(span: TagSpan): string {
   return `<span class="tk-tag">#${escapeHtml(span.tag)}</span>`;
-}
-
-/** パスから表示名（拡張子を除いた最終セグメント）を得る */
-function noteDisplayName(path: string): string {
-  const base = path.split('/').at(-1) ?? path;
-  return base.endsWith('.md') ? base.slice(0, -3) : base;
 }
 
 /** プレースホルダーを実 HTML に置換する（marker は正規表現に使わない） */

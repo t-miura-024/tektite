@@ -6,16 +6,11 @@
  * SPA 遷移する（既存の Link / noteRoutePath を使用）。
  */
 
+import { noteDisplayName } from '@/application/note-name';
 import type { VaultRef } from '@/domain/vault';
 
 import { Link } from '@/ui/components/Link';
 import { noteRoutePath } from '@/ui/router';
-
-/** パスから表示名（拡張子を除いた最終セグメント）を得る */
-function noteDisplayName(path: string): string {
-  const base = path.split('/').at(-1) ?? path;
-  return base.endsWith('.md') ? base.slice(0, -3) : base;
-}
 
 export interface BacklinkPanelProps {
   vaultRef: VaultRef;

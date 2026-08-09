@@ -164,6 +164,45 @@ describe('SearchPanel', () => {
     root.unmount();
   });
 
+  it('IME 変換中の Enter（isComposing）はノートを開かない', async () => {
+    const searcher = createNoteSearcher([
+      { path: 'notes/alpha.md', content: 'アルファの本文', tags: [] },
+    ]);
+    let closed = false;
+    const { root, input } = await renderPanel(searcher, () => {
+      closed = true;
+    });
+    await typeQuery(input, 'アルファ');
+    await act(async () => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+      // jsdom は KeyboardEventInit の isComposing を反映しないため defineProperty で設定
+      Object.defineProperty(event, 'isComposing', { value: true });
+      input.dispatchEvent(event);
+    });
+    expect(window.location.pathname).toBe('/');
+    expect(closed).toBe(false);
+    root.unmount();
+  });
+
+  it('IME 変換確定時の Enter（keyCode 229）は一度スキップされる', async () => {
+    const searcher = createNoteSearcher([
+      { path: 'notes/alpha.md', content: 'アルファの本文', tags: [] },
+    ]);
+    let closed = false;
+    const { root, input } = await renderPanel(searcher, () => {
+      closed = true;
+    });
+    await typeQuery(input, 'アルファ');
+    await act(async () => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+      Object.defineProperty(event, 'keyCode', { value: 229 });
+      input.dispatchEvent(event);
+    });
+    expect(window.location.pathname).toBe('/');
+    expect(closed).toBe(false);
+    root.unmount();
+  });
+
   it('結果のクリックでノートを開く', async () => {
     const searcher = createNoteSearcher([
       { path: 'notes/alpha.md', content: 'アルファの本文', tags: [] },
