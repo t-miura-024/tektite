@@ -377,6 +377,18 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
         <button type="button" className="workspace-rail-button" aria-label="ブックマーク">
           ♡
         </button>
+        <button type="button" className="workspace-rail-button" aria-label="グラフビュー">
+          ⌘
+        </button>
+        <button type="button" className="workspace-rail-button" aria-label="データベース">
+          ▦
+        </button>
+        <button type="button" className="workspace-rail-button" aria-label="カレンダー">
+          ▣
+        </button>
+        <button type="button" className="workspace-rail-button" aria-label="コマンド">
+          &gt;_
+        </button>
         <span className="workspace-rail-spacer" />
         <button
           type="button"

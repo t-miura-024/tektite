@@ -1882,3 +1882,38 @@ body {
   font-weight: 700;
   line-height: 1.15;
 }
+
+/* Vault workspaces use the tab strip as the top chrome, like Obsidian. */
+.vault-workspace-shell .app-header {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  width: auto;
+  min-height: 2.35rem;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.vault-workspace-shell .app-header h1,
+.vault-workspace-shell .session-login {
+  display: none;
+}
+
+.vault-workspace-shell .session-controls {
+  pointer-events: auto;
+}
+
+.vault-workspace-shell .session-controls .button-secondary {
+  border-color: transparent;
+  background: transparent;
+}
+
+.vault-workspace-shell .vault-screen {
+  min-height: 100vh;
+}
+
+.vault-workspace-shell .vault-content {
+  min-height: 100vh;
+}

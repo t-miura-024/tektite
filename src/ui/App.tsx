@@ -137,7 +137,9 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main
+      className={`app-shell${route.kind === 'tree' || route.kind === 'note' ? ' vault-workspace-shell' : ''}`}
+    >
       {toast && (
         <Toast
           message={toast.message}
