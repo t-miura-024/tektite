@@ -18,7 +18,7 @@
 import { Context, Effect, Layer } from 'effect';
 
 import { NoteFetchError, NoteGateway } from '@/application/note';
-import type { NoteContent } from '@/application/note';
+import type { FileChange, NoteContent } from '@/application/note';
 import type { VaultRef } from '@/domain/vault';
 
 /** Vault 全ノートの共有メモリ索引（検索・クイックスイッチャー・バックリンクで共用） */
@@ -42,6 +42,13 @@ export interface NoteIndexRegistry {
   readonly get: (ref: VaultRef) => NoteIndex | null;
   /** 保存後の本文を索引へ反映し、更新後の索引を返す（未展開は null） */
   readonly applySaved: (ref: VaultRef, notePath: string, content: string) => NoteIndex | null;
+  /**
+   * 一括コミット（ファイル操作）後の索引を反映し、更新後の索引を返す（M5）。
+   * move は元パスの本文を新パスへ引き継ぎ、delete は除去、create/update は
+   * 本文を差し替える。changes の順に適用する（move 後の update で張り替え後
+   * 本文が勝つ）。未展開は null。
+   */
+  readonly applyFileChanges: (ref: VaultRef, changes: readonly FileChange[]) => NoteIndex | null;
 }
 export const NoteIndexRegistry = Context.GenericTag<NoteIndexRegistry>('tektite/NoteIndexRegistry');
 
@@ -89,6 +96,30 @@ export function createNoteIndexRegistry(): NoteIndexRegistry {
         existing === undefined ? { path: notePath, sha: '', content } : { ...existing, content };
       const notes = new Map(index.notes);
       notes.set(notePath, updated);
+      const next = { ...index, notes };
+      indexes.set(registryKey(ref), next);
+      return next;
+    },
+    applyFileChanges: (ref, changes) => {
+      const index = indexes.get(registryKey(ref));
+      if (index === undefined) {
+        return null;
+      }
+      const notes = new Map(index.notes);
+      for (const change of changes) {
+        if (change.op === 'delete') {
+          notes.delete(change.path);
+        } else if (change.op === 'move') {
+          const source = notes.get(change.path);
+          if (source !== undefined) {
+            // 本文は元パスのものを引き継ぐ（張り替え後の update が後続で上書きする）
+            notes.set(change.to, { path: change.to, sha: '', content: source.content });
+          }
+          notes.delete(change.path);
+        } else {
+          notes.set(change.path, { path: change.path, sha: '', content: change.content });
+        }
+      }
       const next = { ...index, notes };
       indexes.set(registryKey(ref), next);
       return next;

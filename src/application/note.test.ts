@@ -48,8 +48,9 @@ function createGatewayStub(note: NoteContent): GatewayStub {
   const fetchAllNotes = vi
     .fn<(ref: VaultRef) => Effect.Effect<NoteIndexData, NoteFetchError>>()
     .mockReturnValue(Effect.succeed(INDEX_DATA));
+  const commitChanges = vi.fn();
   return {
-    gateway: { fetchNote, fetchAllNotes, saveNote },
+    gateway: { fetchNote, fetchAllNotes, saveNote, commitChanges },
     fetchNoteMock: fetchNote,
     saveNoteMock: saveNote,
   };
@@ -76,6 +77,7 @@ describe('note ユースケース', () => {
         .mockReturnValue(Effect.fail(new NoteFetchError('not_found', 'ノートが見つかりません。'))),
       fetchAllNotes: vi.fn(),
       saveNote: vi.fn(),
+      commitChanges: vi.fn(),
     };
     const result = await Effect.runPromise(
       Effect.either(Effect.provide(openNote(REF, NOTE_PATH), provideStub(gateway))),
@@ -128,6 +130,7 @@ describe('note ユースケース', () => {
         .mockReturnValue(
           Effect.fail(new NoteSaveError('conflict', 'リモートの内容が変更されていました。')),
         ),
+      commitChanges: vi.fn(),
     };
     const result = await Effect.runPromise(
       Effect.either(

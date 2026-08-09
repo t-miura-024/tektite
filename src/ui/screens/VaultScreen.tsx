@@ -18,6 +18,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { applyFileOperation } from '@/application/file';
+import type { FileOperation } from '@/application/file';
 import { applySavedNote, loadNoteIndex } from '@/application/note-index';
 import type { NoteIndex } from '@/application/note-index';
 import { createNoteSearcher } from '@/application/search';
@@ -27,7 +29,12 @@ import { run } from '@/composition';
 import { buildNotationIndex } from '@/domain/notation/index';
 import type { VaultNotationIndex } from '@/domain/notation/index';
 import type { TreeDirectory, VaultTree } from '@/domain/tree';
-import { ancestorDirectoryPaths } from '@/domain/tree';
+import {
+  ancestorDirectoryPaths,
+  joinDirectoryPath,
+  parentDirectoryPath,
+  pathBaseName,
+} from '@/domain/tree';
 import type { VaultRef } from '@/domain/vault';
 import { vaultRefFullName } from '@/domain/vault';
 
@@ -38,6 +45,8 @@ import { NotePane } from '@/ui/components/NotePane';
 import { QuickSwitcher } from '@/ui/components/QuickSwitcher';
 import { SearchPanel } from '@/ui/components/SearchPanel';
 import { TagPanel } from '@/ui/components/TagPanel';
+import { fileErrorMessage } from '@/ui/note-error';
+import { navigate, noteRoutePath, vaultRoutePath } from '@/ui/router';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError, vaultErrorMessage } from '@/ui/vault-error';
 
@@ -255,11 +264,63 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     });
   }, []);
 
-  // ツリーが取得できている間だけ全ファイルパスを算出する（リーディング表示用）
+  // ツリーが取得できている間だけ全ファイルパスを算出する（リーディング表示と
+  // ファイル操作のリンク張り替え入力に使う）
   const filePaths = useMemo(
     () => (state.kind === 'ready' ? collectFilePaths(state.tree.root) : []),
     [state],
   );
+
+  /**
+   * ファイル操作（作成/リネーム/移動/削除）を一括コミットで実行する（M5）。
+   * 成功時はツリーを再読込し、開いているノートが操作の影響を受けた場合は
+   * 新しいパス（移動・リネーム）へ、消えた場合は Vault ルートへ遷移する。
+   * 張り替えられなかった曖昧参照がある場合は件数をトーストで通知する。
+   */
+  const runFileOperation = useCallback(
+    async (operation: FileOperation, successMessage: string): Promise<void> => {
+      try {
+        const result = await run(applyFileOperation({ owner, name }, operation, filePaths));
+        let message = successMessage;
+        if (result.issues.length > 0) {
+          message += `（${result.issues.length} 件のリンクは曖昧なため張り替えませんでした）`;
+        }
+        notify(message);
+        // ツリー + 共有索引を再読込する（索引はユースケースが更新済みのため再取得されない）
+        await load();
+        // 開いているノートの遷移: 作成 → 新ノートを開く / 移動・リネーム → 新パス /
+        // 削除（ディレクトリ削除含む） → Vault ルート
+        if (operation.kind === 'create-note') {
+          navigate(noteRoutePath({ owner, name }, operation.path));
+        } else if (notePath !== null) {
+          const moved = result.movedPaths.find((move) => move.from === notePath);
+          if (moved !== undefined) {
+            navigate(noteRoutePath({ owner, name }, moved.to));
+          } else if (result.removedPaths.includes(notePath)) {
+            navigate(vaultRoutePath({ owner, name }));
+          }
+        }
+      } catch (error) {
+        if (isSessionExpiredError(error)) {
+          notify('セッションの有効期限が切れました。ログインし直してください。');
+          onSessionExpired();
+          return;
+        }
+        notify(fileErrorMessage(error));
+      }
+    },
+    [owner, name, filePaths, notePath, notify, onSessionExpired, load],
+  );
+
+  /** ファイル操作の成功トースト文言（操作種別ごと） */
+  const fileOperationMessages: Record<FileOperation['kind'], string> = {
+    'create-note': 'ノートを作成しました。',
+    'create-directory': 'フォルダーを作成しました。',
+    'delete-note': 'ノートを削除しました。',
+    'delete-directory': 'フォルダーを削除しました。',
+    'rename-note': 'リネームしました。',
+    'rename-directory': 'リネームしました。',
+  };
 
   return (
     <div className="vault-screen">
@@ -318,6 +379,44 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
               expandedPaths={expandedPaths}
               selectedPath={notePath}
               onToggleDirectory={toggleDirectory}
+              onCreateNote={(noteName) =>
+                void runFileOperation(
+                  { kind: 'create-note', path: noteName },
+                  fileOperationMessages['create-note'],
+                )
+              }
+              onCreateDirectory={(directoryName) =>
+                void runFileOperation(
+                  { kind: 'create-directory', path: directoryName },
+                  fileOperationMessages['create-directory'],
+                )
+              }
+              onRename={(path, type, newName) =>
+                void runFileOperation(
+                  {
+                    kind: type === 'file' ? 'rename-note' : 'rename-directory',
+                    from: path,
+                    to: joinDirectoryPath(parentDirectoryPath(path), newName),
+                  },
+                  fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
+                )
+              }
+              onMove={(path, type, targetDirectory) =>
+                void runFileOperation(
+                  {
+                    kind: type === 'file' ? 'rename-note' : 'rename-directory',
+                    from: path,
+                    to: joinDirectoryPath(targetDirectory, pathBaseName(path)),
+                  },
+                  fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
+                )
+              }
+              onDelete={(path, type) =>
+                void runFileOperation(
+                  { kind: type === 'file' ? 'delete-note' : 'delete-directory', path },
+                  fileOperationMessages[type === 'file' ? 'delete-note' : 'delete-directory'],
+                )
+              }
             />
           </>
         )}

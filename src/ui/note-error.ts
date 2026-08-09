@@ -4,7 +4,7 @@
  * Vault 系（src/ui/vault-error）と同じ kind 合併型を扱う。
  */
 
-import { NoteFetchError, NoteSaveError } from '@/application/note';
+import { FileCommitError, NoteFetchError, NoteSaveError } from '@/application/note';
 import { vaultErrorMessage } from '@/ui/vault-error';
 
 export function noteErrorMessage(error: unknown): string {
@@ -37,6 +37,27 @@ export function noteSaveErrorMessage(error: unknown): string {
         return '保存できませんでした。リモートの内容が変更されています。';
       case 'not_found':
         return 'ノートが見つからないため保存できませんでした。';
+      case 'network':
+        return 'サーバーと通信できませんでした。接続を確認してください。';
+      case 'server':
+        return error.message;
+    }
+  }
+  return noteErrorMessage(error);
+}
+
+/** ファイル操作（作成/リネーム/移動/削除）エラーの表示メッセージ変換 */
+export function fileErrorMessage(error: unknown): string {
+  if (error instanceof FileCommitError) {
+    switch (error.kind) {
+      case 'unauthenticated':
+        return 'セッションの有効期限が切れました。ログインし直してください。';
+      case 'rate_limited':
+        return 'GitHub API のレートリミットに達しました。しばらくしてから再試行してください。';
+      case 'conflict':
+        return '操作できませんでした。リモートの内容が変更されています。再読み込みしてください。';
+      case 'not_found':
+        return '対象が見つからないため操作できませんでした。';
       case 'network':
         return 'サーバーと通信できませんでした。接続を確認してください。';
       case 'server':

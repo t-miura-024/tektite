@@ -1202,3 +1202,185 @@ body {
   background-color: var(--color-mark);
   color: inherit;
 }
+
+/* ファイル操作（M5: 作成・リネーム・移動・削除） */
+.file-tree-toolbar {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.file-tree-toolbar .button-secondary {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 0.8rem;
+}
+
+.file-tree-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.file-tree-editor input,
+.file-tree-rename-input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg);
+  color: inherit;
+  font: inherit;
+}
+
+.file-tree-editor-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 0.75rem;
+}
+
+.file-tree-rename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  padding-inline-start: calc(var(--space-sm) + var(--tree-depth, 0) * var(--space-md));
+}
+
+.file-tree-rename-input {
+  flex: 1 1 8rem;
+}
+
+.file-context-menu {
+  position: fixed;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+  padding: var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.file-context-menu button {
+  padding: var(--space-xs) var(--space-sm);
+  border: none;
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-context-menu button:hover {
+  background-color: var(--color-bg-subtle);
+}
+
+/* ダイアログ（確認・移動先選択） */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-md);
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  width: min(28rem, 100%);
+  max-height: 80vh;
+  padding: var(--space-lg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  overflow: auto;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dialog-message {
+  margin: 0;
+  color: var(--color-fg);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.button-danger {
+  display: inline-block;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button-danger:hover {
+  opacity: 0.9;
+}
+
+.move-dialog-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.move-dialog-list button {
+  display: block;
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  border: none;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.move-dialog-list button:hover {
+  background-color: var(--color-bg-subtle);
+}
+
+.move-dialog-list button.is-selected {
+  background-color: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+
+.move-dialog-list button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.move-dialog-blocked-note {
+  margin-left: var(--space-sm);
+  font-size: 0.75rem;
+}

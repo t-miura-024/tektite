@@ -190,6 +190,15 @@ const NOTES = {
 /** テストシーム（POST /__mock/contents/...）で採番する sha の連番 */
 let MOCK_SHA_COUNTER = 0;
 
+/** 一括コミット（M5）で作成された blob（sha → base64 本文） */
+const BLOBS = new Map();
+
+/** 一括コミット（M5）で作成された commit（sha → メタデータ。参照更新の検証用） */
+const COMMITS = new Map();
+
+/** ブランチ先頭コミット sha（キーは "owner/repo:branch"。初回アクセス時に確定する） */
+const HEAD_COMMITS = new Map();
+
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
@@ -305,7 +314,8 @@ const server = createServer(async (req, res) => {
 
   // Git Blobs API（M4 の一括取得 /api/notes/:owner/:repo/all が使用）。
   // sha は Contents API のファイル sha と同じ値（GitHub 実挙動の模倣）のため、
-  // NOTES を sha で逆引きして本文を返す
+  // NOTES を sha で逆引きして本文を返す。一括コミット（M5）で作られた blob は
+  // BLOBS（sha → base64）に積まれるため、そちらも引く
   const blobMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/blobs\/([^/]+)$/);
   if (req.method === 'GET' && blobMatch) {
     if (!requireToken(req, res)) {
@@ -313,14 +323,166 @@ const server = createServer(async (req, res) => {
     }
     const sha = decodeURIComponent(blobMatch[3] ?? '');
     const note = Object.values(NOTES).find((candidate) => candidate.sha === sha);
-    if (!note) {
-      sendJson(res, 404, { message: 'Not Found' });
+    if (note) {
+      sendJson(res, 200, {
+        sha,
+        encoding: 'base64',
+        content: Buffer.from(note.content, 'utf8').toString('base64'),
+      });
       return;
     }
+    const blob = BLOBS.get(sha);
+    if (blob !== undefined) {
+      sendJson(res, 200, { sha, encoding: 'base64', content: blob });
+      return;
+    }
+    sendJson(res, 404, { message: 'Not Found' });
+    return;
+  }
+
+  // ---- M5: 一括コミット（Git Trees/Blobs API）のモック ----
+  // フロー: ref（先頭コミット）→ trees（base tree）→ blobs → trees（差分適用）→
+  // commits → refs（PATCH）。コミットのたびに NOTES / TREES へ変更を反映し、
+  // その後の /api/tree と /api/notes が新しい状態を返すようにする
+
+  // Blob 作成: body { content: base64, encoding } → sha。本文は BLOBS に保持する
+  const blobPostMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/blobs$/);
+  if (req.method === 'POST' && blobPostMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    if (typeof body.content !== 'string') {
+      sendJson(res, 400, { message: 'content must be a base64 string' });
+      return;
+    }
+    const sha = `mock-blob-${++MOCK_SHA_COUNTER}`;
+    BLOBS.set(sha, body.content);
+    sendJson(res, 200, { sha });
+    return;
+  }
+
+  // ブランチ先頭コミットの取得（一括コミットの parents 解決用）
+  const refMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/ref\/heads\/([^/]+)$/);
+  if (req.method === 'GET' && refMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const branch = decodeURIComponent(refMatch[3] ?? '');
+    const key = `${refMatch[1]}/${refMatch[2]}:${branch}`;
+    const sha = HEAD_COMMITS.get(key) ?? `mock-commit-${key}`;
+    HEAD_COMMITS.set(key, sha);
     sendJson(res, 200, {
-      sha,
-      encoding: 'base64',
-      content: Buffer.from(note.content, 'utf8').toString('base64'),
+      ref: `refs/heads/${branch}`,
+      object: { sha, type: 'commit', url: 'http://mock.invalid/commit' },
+    });
+    return;
+  }
+
+  // 新 tree 作成: 差分エントリ（sha: null は削除）を NOTES / TREES へ反映する
+  const treePostMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/trees$/);
+  if (req.method === 'POST' && treePostMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    if (!Array.isArray(body.tree)) {
+      sendJson(res, 400, { message: 'tree must be an array' });
+      return;
+    }
+    const owner = treePostMatch[1];
+    const repo = treePostMatch[2];
+    const treeKey = `${owner}/${repo}:main`;
+    // 1) 追加エントリ（sha あり）を先に適用する。BLOBS にあれば新規本文、
+    //    なければ同じ sha の既存 NOTES から引き継ぐ（move の内容保持）
+    for (const entry of body.tree) {
+      if (entry.sha === null || typeof entry.path !== 'string') {
+        continue;
+      }
+      const noteKey = `${owner}/${repo}:${entry.path}`;
+      const blob = BLOBS.get(entry.sha);
+      if (blob !== undefined) {
+        NOTES[noteKey] = {
+          sha: entry.sha,
+          content: Buffer.from(blob, 'base64').toString('utf8'),
+        };
+      } else {
+        const existing = Object.entries(NOTES).find(([, note]) => note.sha === entry.sha);
+        if (existing) {
+          NOTES[noteKey] = { ...existing[1], sha: entry.sha };
+        }
+      }
+      const tree = TREES[treeKey];
+      if (tree) {
+        const index = tree.findIndex((item) => item.path === entry.path);
+        if (index !== -1) {
+          tree[index] = { path: entry.path, type: 'blob', sha: entry.sha };
+        } else {
+          tree.push({ path: entry.path, type: 'blob', sha: entry.sha });
+        }
+      }
+    }
+    // 2) 削除エントリ（sha: null）を適用する（move の元パス除去は追加の後に）
+    for (const entry of body.tree) {
+      if (entry.sha !== null || typeof entry.path !== 'string') {
+        continue;
+      }
+      delete NOTES[`${owner}/${repo}:${entry.path}`];
+      const tree = TREES[treeKey];
+      if (tree) {
+        const index = tree.findIndex((item) => item.path === entry.path);
+        if (index !== -1) {
+          tree.splice(index, 1);
+        }
+      }
+    }
+    sendJson(res, 200, {
+      sha: `mock-tree-${++MOCK_SHA_COUNTER}`,
+      truncated: false,
+      tree: body.tree,
+    });
+    return;
+  }
+
+  // コミット作成: body { message, tree, parents } → sha
+  const commitPostMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/commits$/);
+  if (req.method === 'POST' && commitPostMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    if (typeof body.message !== 'string' || typeof body.tree !== 'string') {
+      sendJson(res, 400, { message: 'message and tree are required' });
+      return;
+    }
+    const sha = `mock-commit-${++MOCK_SHA_COUNTER}`;
+    COMMITS.set(sha, { message: body.message, tree: body.tree, parents: body.parents ?? [] });
+    sendJson(res, 200, { sha, commit: { message: body.message, tree: body.tree } });
+    return;
+  }
+
+  // ブランチ参照の更新（一括コミットの最後。force は無視して成功させる）
+  const refsPatchMatch = url.pathname.match(
+    /^\/repos\/([^/]+)\/([^/]+)\/git\/refs\/heads\/([^/]+)$/,
+  );
+  if (req.method === 'PATCH' && refsPatchMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const raw = await readBody(req);
+    const body = JSON.parse(raw || '{}');
+    if (typeof body.sha !== 'string') {
+      sendJson(res, 400, { message: 'sha is required' });
+      return;
+    }
+    const branch = decodeURIComponent(refsPatchMatch[3] ?? '');
+    HEAD_COMMITS.set(`${refsPatchMatch[1]}/${refsPatchMatch[2]}:${branch}`, body.sha);
+    sendJson(res, 200, {
+      ref: `refs/heads/${branch}`,
+      object: { sha: body.sha, type: 'commit' },
     });
     return;
   }

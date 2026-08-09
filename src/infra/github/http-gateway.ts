@@ -18,8 +18,11 @@
 
 import { Effect, Layer } from 'effect';
 
-import { NoteFetchError, NoteGateway, NoteSaveError } from '@/application/note';
+import { FileCommitError, NoteFetchError, NoteGateway, NoteSaveError } from '@/application/note';
 import type {
+  CommitChangesInput,
+  CommitResult,
+  FileChange,
   NoteContent,
   NoteIndexData,
   NoteSaveRequest,
@@ -41,6 +44,15 @@ function readString(value: unknown): string | null {
 /** プロキシ系エラーの kind（Vault / ノート取得で共通の文字列合併型） */
 type FetchErrorKind = 'unauthenticated' | 'rate_limited' | 'not_found' | 'server' | 'network';
 
+/** 保存系エラーの kind（FetchErrorKind に conflict を加えたもの） */
+type SaveErrorKind =
+  | 'unauthenticated'
+  | 'rate_limited'
+  | 'conflict'
+  | 'not_found'
+  | 'server'
+  | 'network';
+
 /** UTF-8 文字列を base64（btoa 互換）にエンコードする（PUT の content 用） */
 function encodeBase64Content(content: string): string {
   const bytes = new TextEncoder().encode(content);
@@ -54,6 +66,11 @@ function encodeBase64Content(content: string): string {
 /** kind を持つ Error 派生クラスのコンストラクタ（VaultFetchError / NoteFetchError） */
 interface FetchErrorConstructor<E extends Error> {
   new (kind: FetchErrorKind, message: string, options?: { cause?: unknown }): E;
+}
+
+/** kind を持つ Error 派生クラスのコンストラクタ（保存系。conflict を含む） */
+interface SaveErrorConstructor<E extends Error> {
+  new (kind: SaveErrorKind, message: string, options?: { cause?: unknown }): E;
 }
 
 /** プロキシにリクエストし、HTTP ステータスをエラー種別に変換して JSON を返す */
@@ -93,48 +110,57 @@ function requestJson<E extends Error>(
 }
 
 /**
- * ノート保存（PUT）専用のリクエスト。取得系（requestJson）と違って JSON ボディを
- * 送り、409（sha 楽観ロック競合）を conflict として区別して返す。
+ * 保存/一括コミット（PUT / POST）専用のリクエスト。取得系（requestJson）と違って
+ * JSON ボディを送り、409（sha 楽観ロック競合・ブランチ競合）を conflict として
+ * 区別して返す。エラー種別（ErrorCtor）は呼び出し側が選ぶ。
  */
-function requestSave(path: string, body: unknown): Effect.Effect<unknown, NoteSaveError> {
+function requestSave<E extends Error>(
+  path: string,
+  body: unknown,
+  ErrorCtor: SaveErrorConstructor<E>,
+  options: { method?: 'PUT' | 'POST'; conflictMessage?: string } = {},
+): Effect.Effect<unknown, E> {
+  const method = options.method ?? 'PUT';
   return Effect.gen(function* () {
     const response = yield* Effect.tryPromise({
       try: () =>
         fetch(path, {
-          method: 'PUT',
+          method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         }),
       catch: (error) =>
-        new NoteSaveError('network', 'サーバーと通信できませんでした。', { cause: error }),
+        new ErrorCtor('network', 'サーバーと通信できませんでした。', { cause: error }),
     });
     if (response.status === 401) {
       return yield* Effect.fail(
-        new NoteSaveError('unauthenticated', 'セッションの有効期限が切れました。'),
+        new ErrorCtor('unauthenticated', 'セッションの有効期限が切れました。'),
       );
     }
     if (response.status === 429) {
       return yield* Effect.fail(
-        new NoteSaveError('rate_limited', 'GitHub API のレートリミットに達しました。'),
+        new ErrorCtor('rate_limited', 'GitHub API のレートリミットに達しました。'),
       );
     }
     if (response.status === 404) {
-      return yield* Effect.fail(new NoteSaveError('not_found', 'リソースが見つかりませんでした。'));
+      return yield* Effect.fail(new ErrorCtor('not_found', 'リソースが見つかりませんでした。'));
     }
     if (response.status === 409) {
       return yield* Effect.fail(
-        new NoteSaveError('conflict', '保存前にリモートの内容が変更されていました。'),
+        new ErrorCtor(
+          'conflict',
+          options.conflictMessage ?? '保存前にリモートの内容が変更されていました。',
+        ),
       );
     }
     if (!response.ok) {
       return yield* Effect.fail(
-        new NoteSaveError('server', `保存に失敗しました（HTTP ${response.status}）。`),
+        new ErrorCtor('server', `保存に失敗しました（HTTP ${response.status}）。`),
       );
     }
     return yield* Effect.tryPromise({
       try: () => response.json(),
-      catch: (error) =>
-        new NoteSaveError('server', 'サーバー応答の形式が不正です。', { cause: error }),
+      catch: (error) => new ErrorCtor('server', 'サーバー応答の形式が不正です。', { cause: error }),
     });
   });
 }
@@ -244,6 +270,21 @@ function parseNoteSaveBody(body: unknown): NoteSaveResult | null {
   return { path: notePath, sha };
 }
 
+/** /api/files 一括コミット応答を CommitResult にパースする（形式不正は null） */
+function parseCommitResultBody(body: unknown): CommitResult | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+  const owner = readString(body.owner);
+  const name = readString(body.name);
+  const branch = readString(body.branch);
+  const commitSha = readString(body.commitSha);
+  if (!owner || !name || !branch || !commitSha) {
+    return null;
+  }
+  return { owner, name, branch, commitSha };
+}
+
 const invalidVaultResponse = () =>
   Effect.fail(new VaultFetchError('server', 'サーバー応答の形式が不正です。'));
 
@@ -308,15 +349,39 @@ export const NoteGatewayLive = Layer.succeed(NoteGateway, {
       const path = `/api/notes/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/blob/${encodeURIComponent(notePath)}`;
       // sha が null の新規作成は JSON からキーごと落とす（プロキシが Create として扱う）。
       // content はプロキシ（functions/api/notes）の規約に合わせて base64 で渡す
-      const body = yield* requestSave(path, {
-        content: encodeBase64Content(request.content),
-        message: request.message,
-        ...(request.sha === null ? {} : { sha: request.sha }),
-      });
+      const body = yield* requestSave(
+        path,
+        {
+          content: encodeBase64Content(request.content),
+          message: request.message,
+          ...(request.sha === null ? {} : { sha: request.sha }),
+        },
+        NoteSaveError,
+      );
       const saved = parseNoteSaveBody(body);
       if (saved === null) {
         return yield* invalidNoteSaveResponse();
       }
       return saved;
+    }),
+
+  commitChanges: (ref: VaultRef, input: CommitChangesInput) =>
+    Effect.gen(function* () {
+      const path = `/api/files/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/commit`;
+      // content は base64（/api/notes 保存と同じ規約）。move / delete は content なし
+      const changes: FileChange[] = input.changes.map((change) =>
+        change.op === 'create' || change.op === 'update'
+          ? { ...change, content: encodeBase64Content(change.content) }
+          : change,
+      );
+      const body = yield* requestSave(path, { changes, message: input.message }, FileCommitError, {
+        method: 'POST',
+        conflictMessage: 'コミット前にリモートが変更されていました。',
+      });
+      const result = parseCommitResultBody(body);
+      if (result === null) {
+        return yield* Effect.fail(new FileCommitError('server', 'サーバー応答の形式が不正です。'));
+      }
+      return result;
     }),
 });
