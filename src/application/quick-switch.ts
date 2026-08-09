@@ -12,6 +12,8 @@
  * ファイル名が検索できる。巨大 Vault への最適化は行わない（ADR-0004）。
  */
 
+import { noteDisplayName } from '@/application/note-name';
+
 /** 一度に表示する結果の上限（全文検索と同じ。個人 Vault では十分） */
 const MAX_RESULTS = 50;
 
@@ -24,12 +26,6 @@ export interface QuickSwitchHit {
   readonly positions: readonly number[];
   /** 一致対象: 表示名が優先。パスにしか現れない場合は 'path' */
   readonly matchedField: 'name' | 'path';
-}
-
-/** パスから拡張子を除いた表示名（ノート名）を得る */
-function noteDisplayName(path: string): string {
-  const base = path.split('/').at(-1) ?? path;
-  return base.endsWith('.md') ? base.slice(0, -3) : base;
 }
 
 /**

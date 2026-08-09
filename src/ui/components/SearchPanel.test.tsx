@@ -27,13 +27,24 @@ interface Rendered {
   input: HTMLInputElement;
 }
 
-async function renderPanel(searcher: NoteSearcher | null, onClose?: () => void): Promise<Rendered> {
+async function renderPanel(
+  searcher: NoteSearcher | null,
+  onClose?: () => void,
+  indexFailed = false,
+  onRetry?: () => void,
+): Promise<Rendered> {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => {
     root.render(
-      <SearchPanel vaultRef={vaultRef} searcher={searcher} onClose={onClose ?? (() => {})} />,
+      <SearchPanel
+        vaultRef={vaultRef}
+        searcher={searcher}
+        indexFailed={indexFailed}
+        onRetry={onRetry ?? (() => {})}
+        onClose={onClose ?? (() => {})}
+      />,
     );
   });
   const input = container.querySelector('input');
@@ -97,6 +108,26 @@ describe('SearchPanel', () => {
   it('索引未ロード（searcher null）の場合は読み込み中を表示する', async () => {
     const { container, root } = await renderPanel(null);
     expect(container.textContent).toContain('ノート索引を読み込み中…');
+    root.unmount();
+  });
+
+  it('索引の読み込みに失敗した場合はエラーと再試行ボタンを表示する', async () => {
+    let retried = false;
+    const { container, root } = await renderPanel(
+      null,
+      () => {},
+      true,
+      () => {
+        retried = true;
+      },
+    );
+    expect(container.textContent).toContain('ノート索引を読み込めませんでした');
+    const retry = container.querySelector('button');
+    expect(retry?.textContent).toBe('再試行');
+    await act(async () => {
+      retry!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(retried).toBe(true);
     root.unmount();
   });
 

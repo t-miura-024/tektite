@@ -46,10 +46,20 @@ export interface QuickSwitcherProps {
   vaultRef: VaultRef;
   /** 検索対象ノートのパス一覧（null は索引未ロード） */
   notePaths: readonly string[] | null;
+  /** 索引の読み込みに失敗したか（true のとき読み込み中ではなくエラーを表示） */
+  indexFailed: boolean;
+  /** 索引の再読込（VaultScreen の load を再実行する） */
+  onRetry: () => void;
   onClose: () => void;
 }
 
-export function QuickSwitcher({ vaultRef, notePaths, onClose }: QuickSwitcherProps) {
+export function QuickSwitcher({
+  vaultRef,
+  notePaths,
+  indexFailed,
+  onRetry,
+  onClose,
+}: QuickSwitcherProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -115,7 +125,16 @@ export function QuickSwitcher({ vaultRef, notePaths, onClose }: QuickSwitcherPro
           autoFocus
           aria-label="ノート名クエリ"
         />
-        {notePaths === null ? (
+        {notePaths === null && indexFailed ? (
+          <div className="quick-switch-error">
+            <p className="quick-switch-status" role="status">
+              ノート索引を読み込めませんでした。
+            </p>
+            <button type="button" className="button-secondary" onClick={onRetry}>
+              再試行
+            </button>
+          </div>
+        ) : notePaths === null ? (
           <p className="quick-switch-status" role="status">
             ノート索引を読み込み中…
           </p>

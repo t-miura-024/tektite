@@ -81,6 +81,12 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
    * レジストリへ反映し、この state も更新する。
    */
   const [noteIndex, setNoteIndex] = useState<NoteIndex | null>(null);
+  /**
+   * ノート索引の読み込み失敗メッセージ（null は成功 / 未実行）。
+   * 失敗時は検索パネル・クイックスイッチャーが「読み込み中…」の代わりに
+   * エラーと再試行導線を表示する（difit 指摘 5）。
+   */
+  const [indexError, setIndexError] = useState<string | null>(null);
   /** 全文検索パネルの開閉（Cmd+K / Ctrl+K と検索ボタンから操作する） */
   const [searchOpen, setSearchOpen] = useState(false);
   /** クイックスイッチャーの開閉（Cmd+O / Ctrl+O と移動ボタンから操作する）（M3） */
@@ -108,11 +114,15 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     }
     // ツリー取得成功後、全ノートを共有索引へ展開する。索引の失敗はツリー表示を
     // 妨げない（タグ一覧・バックリンクが非表示になるだけ）。既に展開済みの Vault は
-    // レジストリが再取得せず同じ索引を返す
+    // レジストリが再取得せず同じ索引を返す。失敗はトーストに加えて indexError に
+    // 保持し、検索パネル・クイックスイッチャーが再試行導線を表示できるようにする
     try {
       const index = await run(loadNoteIndex({ owner, name }));
       setNoteIndex(index);
-    } catch {
+      setIndexError(null);
+    } catch (error) {
+      const message = vaultErrorMessage(error);
+      setIndexError(message);
       notify('ノート索引を取得できませんでした。タグ・バックリンクは表示されません。');
     }
   }, [owner, name, notify, onSessionExpired]);
@@ -201,6 +211,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   // 前の Vault のタグ・バックリンクを表示しない）
   useEffect(() => {
     setNoteIndex(null);
+    setIndexError(null);
     setExpandedPaths(new Set(['']));
   }, [owner, name]);
 
@@ -286,6 +297,11 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
                 リポジトリが大きいため、一部のファイルのみ表示しています。
               </p>
             )}
+            {noteIndex !== null && noteIndex.truncated && (
+              <p className="tree-truncated-notice" role="status">
+                リポジトリが大きいため、一部のノートのみ索引化しています（検索・移動・タグ・バックリンクは不完全です）。
+              </p>
+            )}
             <FileTree
               root={state.tree.root}
               vaultRef={vaultRef}
@@ -323,12 +339,20 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
         )}
       </section>
       {searchOpen && (
-        <SearchPanel vaultRef={vaultRef} searcher={searcher} onClose={() => setSearchOpen(false)} />
+        <SearchPanel
+          vaultRef={vaultRef}
+          searcher={searcher}
+          indexFailed={indexError !== null}
+          onRetry={() => void load()}
+          onClose={() => setSearchOpen(false)}
+        />
       )}
       {quickSwitchOpen && (
         <QuickSwitcher
           vaultRef={vaultRef}
           notePaths={notePaths}
+          indexFailed={indexError !== null}
+          onRetry={() => void load()}
           onClose={() => setQuickSwitchOpen(false)}
         />
       )}

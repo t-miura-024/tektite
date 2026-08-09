@@ -50,6 +50,10 @@ Then('検索結果にノート {string} が表示される', async ({ page }, no
   await expect(page.getByTestId('search-result').filter({ hasText: notePath })).toBeVisible();
 });
 
+Then('検索結果にタグ {string} が表示される', async ({ page }, tag: string) => {
+  await expect(page.getByTestId('search-result').getByText(tag)).toBeVisible();
+});
+
 Then(
   'クイックスイッチャーの結果にノート {string} が表示される',
   async ({ page }, notePath: string) => {

@@ -13,25 +13,30 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import { noteDisplayName } from '@/application/note-name';
 import type { NoteSearcher, SearchHit } from '@/application/search';
 import type { VaultRef } from '@/domain/vault';
 
 import { navigate, noteRoutePath } from '@/ui/router';
 
-/** パスから表示名（拡張子を除いた最終セグメント）を得る */
-function noteDisplayName(path: string): string {
-  const base = path.split('/').at(-1) ?? path;
-  return base.endsWith('.md') ? base.slice(0, -3) : base;
-}
-
 export interface SearchPanelProps {
   vaultRef: VaultRef;
   /** 検索器（null は索引未ロード） */
   searcher: NoteSearcher | null;
+  /** 索引の読み込みに失敗したか（true のとき読み込み中ではなくエラーを表示） */
+  indexFailed: boolean;
+  /** 索引の再読込（VaultScreen の load を再実行する） */
+  onRetry: () => void;
   onClose: () => void;
 }
 
-export function SearchPanel({ vaultRef, searcher, onClose }: SearchPanelProps) {
+export function SearchPanel({
+  vaultRef,
+  searcher,
+  indexFailed,
+  onRetry,
+  onClose,
+}: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -99,7 +104,16 @@ export function SearchPanel({ vaultRef, searcher, onClose }: SearchPanelProps) {
           autoFocus
           aria-label="検索クエリ"
         />
-        {searcher === null ? (
+        {searcher === null && indexFailed ? (
+          <div className="search-panel-error">
+            <p className="search-panel-status" role="status">
+              ノート索引を読み込めませんでした。
+            </p>
+            <button type="button" className="button-secondary" onClick={onRetry}>
+              再試行
+            </button>
+          </div>
+        ) : searcher === null ? (
           <p className="search-panel-status" role="status">
             ノート索引を読み込み中…
           </p>
