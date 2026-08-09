@@ -27,6 +27,13 @@ E2E を初めて実行する場合は `pnpm exec playwright install chromium` �
 
 Cloudflare Pages / GitHub OAuth App のセットアップ手順は [docs/setup.md](./docs/setup.md) を参照。
 
+## Git フック（lefthook）
+
+コミット時は staged ファイルに lint（oxlint）と format（oxfmt、自動修正 + 再ステージ）が、
+プッシュ時は unit テスト（vitest）が自動実行される。設定は [lefthook.yml](./lefthook.yml)。
+`pnpm install` 時に自動でフックがインストールされる（CI 環境ではスキップ）。
+フックをスキップする場合は `git commit --no-verify` / `git push --no-verify` を使う。
+
 ## レイヤリング（実用的ヘキサゴナル）
 
 ```
