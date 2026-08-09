@@ -19,9 +19,9 @@
     もし ユーザーがツールバーの「新規ノート」を押す
     かつ ユーザーが作成フォームに "e2e-create.md" と入力する
     かつ ユーザーが作成を確定する
-    ならば ファイルツリーにファイル "e2e-create.md" が表示される
-    かつ 表示中の URL は "/octocat/notes/blob/e2e-create.md" である
-    かつ ノートペインにノート "e2e-create.md" が表示される
+     ならば ファイルツリーにファイル "e2e-create.md" が表示される
+     かつ 表示中の URL は "/octocat/notes/blob/e2e-create.md" になる
+     かつ ノートペインにノート "e2e-create.md" が表示される
     かつ リモートのノート "e2e-create.md" の内容は空である
     もし ユーザーがファイル "e2e-create.md" を削除する
     ならば ファイルツリーにファイル "e2e-create.md" は表示されない
