@@ -82,6 +82,13 @@ export interface NoteSaveResult {
   readonly sha: string;
 }
 
+/** Vault 全ノートの一括取得データ（プロキシ /api/notes/:owner/:repo/all の応答） */
+export interface NoteIndexData {
+  readonly defaultBranch: string;
+  readonly truncated: boolean;
+  readonly notes: readonly NoteContent[];
+}
+
 /**
  * ポートへの保存要求（コミットメッセージはユースケースが自動生成したもの）。
  * sha が null の場合は新規作成（Contents API の sha 省略）として扱う。
@@ -101,6 +108,7 @@ export interface NoteGateway {
     ref: VaultRef,
     notePath: string,
   ) => Effect.Effect<NoteContent, NoteFetchError>;
+  readonly fetchAllNotes: (ref: VaultRef) => Effect.Effect<NoteIndexData, NoteFetchError>;
   readonly saveNote: (
     ref: VaultRef,
     notePath: string,

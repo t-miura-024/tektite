@@ -281,7 +281,38 @@ const server = createServer(async (req, res) => {
       sendJson(res, 404, { message: 'Not Found' });
       return;
     }
-    sendJson(res, 200, { sha: 'mock-tree-sha', truncated: false, tree });
+    // GitHub の Trees API 応答に合わせ、blob エントリにはファイル sha を含める
+    // （M4 の一括取得 /api/notes/:owner/:repo/all が Git Blobs API の取得に使う）
+    const entries = tree.map((entry) => {
+      if (entry.type !== 'blob') {
+        return entry;
+      }
+      const note = NOTES[`${treeMatch[1]}/${treeMatch[2]}:${entry.path}`];
+      return { ...entry, sha: note?.sha ?? `mock-sha-${entry.path}` };
+    });
+    sendJson(res, 200, { sha: 'mock-tree-sha', truncated: false, tree: entries });
+    return;
+  }
+
+  // Git Blobs API（M4 の一括取得 /api/notes/:owner/:repo/all が使用）。
+  // sha は Contents API のファイル sha と同じ値（GitHub 実挙動の模倣）のため、
+  // NOTES を sha で逆引きして本文を返す
+  const blobMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/git\/blobs\/([^/]+)$/);
+  if (req.method === 'GET' && blobMatch) {
+    if (!requireToken(req, res)) {
+      return;
+    }
+    const sha = decodeURIComponent(blobMatch[3] ?? '');
+    const note = Object.values(NOTES).find((candidate) => candidate.sha === sha);
+    if (!note) {
+      sendJson(res, 404, { message: 'Not Found' });
+      return;
+    }
+    sendJson(res, 200, {
+      sha,
+      encoding: 'base64',
+      content: Buffer.from(note.content, 'utf8').toString('base64'),
+    });
     return;
   }
 

@@ -8,12 +8,18 @@
  * 開いた場合は、そのファイルまでの祖先ディレクトリを自動展開して選択状態を
  * 復元する。レスポンシブ: 狭い画面ではツリーを上部、ノートを下部に縦積みする。
  *
+ * ノート索引（全ノートの本文 + sha）は application 層の共有レジストリ
+ * （note-index.ts）に展開され、タグ一覧・バックリンク・検索（M2 以降）が
+ * 同一インスタンスを参照する。保存後の更新は NotePane の onNoteSaved 経由で
+ * レジストリへ反映する。
+ *
  * ユースケースの実行は組成ルート（src/composition）の run() 経由で行う。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { openNote } from '@/application/note';
+import { applySavedNote, loadNoteIndex } from '@/application/note-index';
+import type { NoteIndex } from '@/application/note-index';
 import { openVault } from '@/application/vault';
 import { run } from '@/composition';
 import { buildNotationIndex } from '@/domain/notation/index';
@@ -64,20 +70,13 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   const [state, setState] = useState<TreeState>({ kind: 'loading' });
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set(['']));
   /**
-   * 記法索引（バックリンク / タグ一覧用）。ツリー取得後に全 Markdown ノートの
-   * 本文を取得して構築する。取得済み本文は Vault 単位のキャッシュ
-   * （contentsCacheRef）に保持し、ノート切替のたびに全件再取得しない
-   * （GitHub Contents API のレートリミット圧迫を避けるため）。
-   * 保存による最新化は NotePane の onNoteSaved 経由でキャッシュへ反映する。
+   * 共有メモリ索引（Vault の全ノート本文 + sha）。ツリー取得成功後に application 層の
+   * レジストリ（note-index.ts）から取得する。同じ Vault への再入場ではレジストリが
+   * 再取得を防ぐ（GitHub のレートリミット圧迫を避けるため）。リロード時はメモリが
+   * 消えるため再取得される。保存による最新化は NotePane の onNoteSaved 経由で
+   * レジストリへ反映し、この state も更新する。
    */
-  const [notation, setNotation] = useState<VaultNotationIndex | null>(null);
-
-  /**
-   * Vault 単位のノート本文キャッシュ（パス → 本文）。ツリー取得時に全
-   * Markdown ノートを 1 度だけ取得して埋め、以後はここから索引を構築する。
-   * Vault（owner/name）が変わったら破棄する。
-   */
-  const contentsCacheRef = useRef<Map<string, string> | null>(null);
+  const [noteIndex, setNoteIndex] = useState<NoteIndex | null>(null);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -97,78 +96,58 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       const message = vaultErrorMessage(error);
       setState({ kind: 'error', message });
       notify(message, { label: '再試行', onClick: () => void load() });
+      return;
+    }
+    // ツリー取得成功後、全ノートを共有索引へ展開する。索引の失敗はツリー表示を
+    // 妨げない（タグ一覧・バックリンクが非表示になるだけ）。既に展開済みの Vault は
+    // レジストリが再取得せず同じ索引を返す
+    try {
+      const index = await run(loadNoteIndex({ owner, name }));
+      setNoteIndex(index);
+    } catch {
+      notify('ノート索引を取得できませんでした。タグ・バックリンクは表示されません。');
     }
   }, [owner, name, notify, onSessionExpired]);
-
-  /**
-   * ツリーから記法索引を構築する。取得できないノート（404 等）は索引から
-   * 欠落させる（バックリンク / タグ表示が不完全になるだけで画面は継続する）。
-   * キャッシュにないノートだけ取得し、取得済みのノートは再取得しない。
-   */
-  const loadNotationIndex = useCallback(
-    async (tree: VaultTree): Promise<VaultNotationIndex> => {
-      const filePaths = collectFilePaths(tree.root);
-      const notePaths = filePaths.filter((path) => path.endsWith('.md'));
-      const cache = contentsCacheRef.current ?? new Map<string, string>();
-      contentsCacheRef.current = cache;
-      await Promise.all(
-        notePaths
-          .filter((path) => !cache.has(path))
-          .map(async (path) => {
-            try {
-              const note = await run(openNote({ owner, name }, path));
-              cache.set(path, note.content);
-            } catch {
-              // 個別ノートの取得失敗は索引から欠落させる
-            }
-          }),
-      );
-      return buildNotationIndex({ filePaths, contents: cache });
-    },
-    [owner, name],
-  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // ツリー取得後に記法索引を構築する。ノート切替（notePath 変更）では再構築
-  // しない（キャッシュが本文を保持しており、保存反映は onNoteSaved が担う）
-  useEffect(() => {
-    if (state.kind !== 'ready') {
-      return;
+  // 共有索引からバックリンク / タグ索引を構築する（検索・クイックスイッチャーは
+  // 同じ noteIndex を参照する。M2 / M3 のスコープ）。ツリーのファイル一覧は
+  // WikiLink 解決（画像含む）のため tree.ts と整合させた全体を使う
+  const notation = useMemo<VaultNotationIndex | null>(() => {
+    if (noteIndex === null || state.kind !== 'ready') {
+      return null;
     }
-    let cancelled = false;
-    void loadNotationIndex(state.tree).then((index) => {
-      if (!cancelled) {
-        setNotation(index);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [state, loadNotationIndex]);
+    const filePaths = collectFilePaths(state.tree.root);
+    const contents = new Map<string, string>();
+    for (const note of noteIndex.notes.values()) {
+      contents.set(note.path, note.content);
+    }
+    return buildNotationIndex({ filePaths, contents });
+  }, [noteIndex, state]);
 
   /**
-   * ノート保存後にキャッシュと索引を更新する。保存済みの本文を渡すため、
-   * 再取得は発生しない（レートリミット圧迫の回避）。
+   * ノート保存後に共有索引とバックリンク / タグ索引を更新する。保存済みの本文を
+   * 渡すため、再取得は発生しない（レートリミット圧迫の回避）。レジストリの索引は
+   * applySaved が更新し、state も同じインスタンスへ置き換えて再レンダリングする。
    */
   const handleNoteSaved = useCallback(
     (path: string, content: string): void => {
-      const cache = contentsCacheRef.current;
-      if (cache === null) {
-        return;
-      }
-      cache.set(path, content);
-      const filePaths = state.kind === 'ready' ? collectFilePaths(state.tree.root) : [];
-      setNotation(buildNotationIndex({ filePaths, contents: cache }));
+      void run(applySavedNote({ owner, name }, path, content)).then((index) => {
+        if (index !== null) {
+          setNoteIndex(index);
+        }
+      });
     },
-    [state],
+    [owner, name],
   );
 
-  // Vault が変わったらキャッシュと展開状態をリセットする
+  // Vault が変わったら索引と展開状態をリセットする（新しい Vault のロード中に
+  // 前の Vault のタグ・バックリンクを表示しない）
   useEffect(() => {
-    contentsCacheRef.current = null;
+    setNoteIndex(null);
     setExpandedPaths(new Set(['']));
   }, [owner, name]);
 

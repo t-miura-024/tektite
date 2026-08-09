@@ -8,13 +8,23 @@ import {
   openNote,
   saveNoteContent,
 } from '@/application/note';
-import type { NoteContent, NoteSaveRequest, NoteSaveResult } from '@/application/note';
+import type {
+  NoteContent,
+  NoteIndexData,
+  NoteSaveRequest,
+  NoteSaveResult,
+} from '@/application/note';
 import type { VaultRef } from '@/domain/vault';
 
 const REF: VaultRef = { owner: 'octocat', name: 'notes' };
 const NOTE_PATH = 'daily/2026-08-08.md';
 const NOTE: NoteContent = { path: NOTE_PATH, sha: 'mock-sha-1', content: '# 2026-08-08\n' };
 const SAVE_RESULT: NoteSaveResult = { path: NOTE_PATH, sha: 'mock-sha-2' };
+const INDEX_DATA: NoteIndexData = {
+  defaultBranch: 'main',
+  truncated: false,
+  notes: [NOTE],
+};
 
 interface GatewayStub {
   gateway: NoteGateway;
@@ -35,7 +45,14 @@ function createGatewayStub(note: NoteContent): GatewayStub {
       ) => Effect.Effect<NoteSaveResult, NoteSaveError>
     >()
     .mockReturnValue(Effect.succeed(SAVE_RESULT));
-  return { gateway: { fetchNote, saveNote }, fetchNoteMock: fetchNote, saveNoteMock: saveNote };
+  const fetchAllNotes = vi
+    .fn<(ref: VaultRef) => Effect.Effect<NoteIndexData, NoteFetchError>>()
+    .mockReturnValue(Effect.succeed(INDEX_DATA));
+  return {
+    gateway: { fetchNote, fetchAllNotes, saveNote },
+    fetchNoteMock: fetchNote,
+    saveNoteMock: saveNote,
+  };
 }
 
 function provideStub(gateway: NoteGateway) {
@@ -57,6 +74,7 @@ describe('note ユースケース', () => {
       fetchNote: vi
         .fn<(ref: VaultRef, notePath: string) => Effect.Effect<NoteContent, NoteFetchError>>()
         .mockReturnValue(Effect.fail(new NoteFetchError('not_found', 'ノートが見つかりません。'))),
+      fetchAllNotes: vi.fn(),
       saveNote: vi.fn(),
     };
     const result = await Effect.runPromise(
@@ -104,6 +122,7 @@ describe('note ユースケース', () => {
   it('ゲートウェイの conflict は NoteSaveError(kind: conflict) として伝播する', async () => {
     const gateway: NoteGateway = {
       fetchNote: vi.fn(),
+      fetchAllNotes: vi.fn(),
       saveNote: vi
         .fn()
         .mockReturnValue(

@@ -19,7 +19,12 @@
 import { Effect, Layer } from 'effect';
 
 import { NoteFetchError, NoteGateway, NoteSaveError } from '@/application/note';
-import type { NoteContent, NoteSaveRequest, NoteSaveResult } from '@/application/note';
+import type {
+  NoteContent,
+  NoteIndexData,
+  NoteSaveRequest,
+  NoteSaveResult,
+} from '@/application/note';
 import { VaultFetchError, VaultGateway } from '@/application/vault';
 import type { VaultTreeData } from '@/application/vault';
 import type { TreeEntry } from '@/domain/tree';
@@ -201,6 +206,31 @@ function parseNoteBody(body: unknown): NoteContent | null {
   return { path: notePath, sha, content };
 }
 
+/** /api/notes/:owner/:repo/all の応答を NoteIndexData にパースする（形式不正は null） */
+function parseNoteIndexBody(body: unknown): NoteIndexData | null {
+  if (!isRecord(body) || !Array.isArray(body.notes)) {
+    return null;
+  }
+  const notes: NoteContent[] = [];
+  for (const item of body.notes) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const notePath = readString(item.path);
+    const sha = readString(item.sha);
+    const content = readString(item.content);
+    if (!notePath || !sha || content === null) {
+      continue;
+    }
+    notes.push({ path: notePath, sha, content });
+  }
+  return {
+    defaultBranch: readString(body.defaultBranch) ?? 'main',
+    truncated: body.truncated === true,
+    notes,
+  };
+}
+
 /** /api/notes 保存応答を NoteSaveResult にパースする（形式不正は null） */
 function parseNoteSaveBody(body: unknown): NoteSaveResult | null {
   if (!isRecord(body)) {
@@ -260,6 +290,17 @@ export const NoteGatewayLive = Layer.succeed(NoteGateway, {
         return yield* invalidNoteResponse();
       }
       return note;
+    }),
+
+  fetchAllNotes: (ref: VaultRef) =>
+    Effect.gen(function* () {
+      const path = `/api/notes/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/all`;
+      const body = yield* requestJson(path, NoteFetchError);
+      const data = parseNoteIndexBody(body);
+      if (data === null) {
+        return yield* invalidNoteResponse();
+      }
+      return data;
     }),
 
   saveNote: (ref: VaultRef, notePath: string, request: NoteSaveRequest) =>

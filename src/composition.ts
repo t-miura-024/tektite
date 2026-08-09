@@ -12,6 +12,7 @@
 import { Cause, Effect, Exit, Layer, Option } from 'effect';
 
 import { DraftStore } from '@/application/draft';
+import { NoteIndexRegistry } from '@/application/note-index';
 import { NoteGateway } from '@/application/note';
 import type { SessionGateway } from '@/application/session';
 import type { VaultGateway } from '@/application/vault';
@@ -28,16 +29,25 @@ import { slugify } from '@/infra/render/slug';
 export type { EditorHandle, EditorOptions } from '@/infra/editor/editor';
 import { SessionGatewayLive } from '@/infra/auth/session-gateway';
 import { NoteGatewayLive, VaultGatewayLive } from '@/infra/github/http-gateway';
+import { NoteIndexRegistryLive } from '@/application/note-index';
 import { DraftStoreLive } from '@/infra/storage/draft-store';
 
 /** 本アプリが組み立てる全ポートの実装 */
 export const MainLive = Layer.merge(
-  Layer.merge(Layer.merge(SessionGatewayLive, VaultGatewayLive), NoteGatewayLive),
-  DraftStoreLive,
+  Layer.merge(
+    Layer.merge(Layer.merge(SessionGatewayLive, VaultGatewayLive), NoteGatewayLive),
+    DraftStoreLive,
+  ),
+  NoteIndexRegistryLive,
 );
 
 /** MainLive が満たすポートの組（ユースケースが要求しうるコンテキスト） */
-export type MainContext = SessionGateway | VaultGateway | NoteGateway | DraftStore;
+export type MainContext =
+  | SessionGateway
+  | VaultGateway
+  | NoteGateway
+  | DraftStore
+  | NoteIndexRegistry;
 
 /**
  * CM6 エディタ生成。UI 層は infra を直接 import できないため（.oxlintrc.json）、
