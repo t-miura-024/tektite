@@ -35,6 +35,7 @@ import { BacklinkPanel } from '@/ui/components/BacklinkPanel';
 import { FileTree } from '@/ui/components/FileTree';
 import { Link } from '@/ui/components/Link';
 import { NotePane } from '@/ui/components/NotePane';
+import { QuickSwitcher } from '@/ui/components/QuickSwitcher';
 import { SearchPanel } from '@/ui/components/SearchPanel';
 import { TagPanel } from '@/ui/components/TagPanel';
 import type { ToastAction } from '@/ui/toast';
@@ -82,6 +83,8 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   const [noteIndex, setNoteIndex] = useState<NoteIndex | null>(null);
   /** 全文検索パネルの開閉（Cmd+K / Ctrl+K と検索ボタンから操作する） */
   const [searchOpen, setSearchOpen] = useState(false);
+  /** クイックスイッチャーの開閉（Cmd+O / Ctrl+O と移動ボタンから操作する）（M3） */
+  const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -150,12 +153,28 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     return createNoteSearcher(notes);
   }, [noteIndex, notation]);
 
-  // Cmd+K / Ctrl+K: 全文検索パネルの開閉（M2。Cmd+S とは衝突しない）
+  // クイックスイッチャー: 共有索引のノートパス一覧（null は索引未ロード）（M3）。
+  // 検索は本文込み、クイックスイッチャーはファイル名のみの対象差があるため、
+  // パス一覧だけを渡してコンポーネント側でファジー検索する
+  const notePaths = useMemo<readonly string[] | null>(
+    () => (noteIndex === null ? null : [...noteIndex.notes.keys()]),
+    [noteIndex],
+  );
+
+  // Cmd+K / Ctrl+K: 全文検索パネルの開閉。Cmd+O / Ctrl+O: クイックスイッチャーの
+  // 開閉（M3）。両パネルは同時に開かない（オーバーレイの重なりを避ける）。
+  // Cmd+S（NotePane の保存）とはキーが異なるため衝突しない
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && key === 'k') {
         event.preventDefault();
         setSearchOpen((open) => !open);
+        setQuickSwitchOpen(false);
+      } else if ((event.metaKey || event.ctrlKey) && key === 'o') {
+        event.preventDefault();
+        setQuickSwitchOpen((open) => !open);
+        setSearchOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -229,13 +248,22 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             ← Vault 一覧
           </Link>
           <h2 className="vault-title">{vaultRefFullName(vaultRef)}</h2>
-          <button
-            type="button"
-            className="button-secondary search-open-button"
-            onClick={() => setSearchOpen(true)}
-          >
-            検索 <span className="search-open-shortcut">⌘K</span>
-          </button>
+          <div className="vault-header-actions">
+            <button
+              type="button"
+              className="button-secondary search-open-button"
+              onClick={() => setSearchOpen(true)}
+            >
+              検索 <span className="search-open-shortcut">⌘K</span>
+            </button>
+            <button
+              type="button"
+              className="button-secondary search-open-button"
+              onClick={() => setQuickSwitchOpen(true)}
+            >
+              移動 <span className="search-open-shortcut">⌘O</span>
+            </button>
+          </div>
         </div>
         {state.kind === 'loading' && (
           <p className="app-placeholder" role="status">
@@ -296,6 +324,13 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       </section>
       {searchOpen && (
         <SearchPanel vaultRef={vaultRef} searcher={searcher} onClose={() => setSearchOpen(false)} />
+      )}
+      {quickSwitchOpen && (
+        <QuickSwitcher
+          vaultRef={vaultRef}
+          notePaths={notePaths}
+          onClose={() => setQuickSwitchOpen(false)}
+        />
       )}
     </div>
   );

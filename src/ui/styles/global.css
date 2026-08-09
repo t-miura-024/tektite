@@ -1013,7 +1013,13 @@ body {
   color: var(--color-accent);
 }
 
-/* 全文検索パネル（M4: M2 検索 UI。Cmd+K または検索ボタンで開くオーバーレイ） */
+/* 全文検索・クイックスイッチャーのオープンボタン（サイドバーヘッダー） */
+.vault-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
 .search-open-button {
   align-self: flex-start;
   margin-block-start: var(--space-xs);
@@ -1025,7 +1031,9 @@ body {
   font-size: 0.75rem;
 }
 
-.search-overlay {
+/* パネルのシェル（オーバーレイ + パネル + 入力 + 状態行）は検索パネルと共通 */
+.search-overlay,
+.quick-switch-overlay {
   position: fixed;
   inset: 0;
   z-index: 100;
@@ -1036,7 +1044,8 @@ body {
   background-color: rgba(0, 0, 0, 0.45);
 }
 
-.search-panel {
+.search-panel,
+.quick-switch-panel {
   display: flex;
   flex-direction: column;
   width: min(40rem, 100%);
@@ -1048,7 +1057,8 @@ body {
   overflow: hidden;
 }
 
-.search-panel-input {
+.search-panel-input,
+.quick-switch-input {
   width: 100%;
   padding: var(--space-sm) var(--space-md);
   border: none;
@@ -1059,11 +1069,13 @@ body {
   font-size: 1rem;
 }
 
-.search-panel-input:focus {
+.search-panel-input:focus,
+.quick-switch-input:focus {
   outline: none;
 }
 
-.search-panel-status {
+.search-panel-status,
+.quick-switch-status {
   margin: 0;
   padding: var(--space-md);
   color: var(--color-fg-muted);
@@ -1131,6 +1143,46 @@ body {
 }
 
 .search-result-snippet mark {
+  background-color: var(--color-mark);
+  color: inherit;
+}
+
+/* クイックスイッチャーの結果一覧（M4: M3。ファイル名のファジー検索） */
+.quick-switch-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.quick-switch-result {
+  padding: var(--space-xs) var(--space-md);
+  cursor: pointer;
+}
+
+.quick-switch-result:hover {
+  background-color: var(--color-bg-subtle);
+}
+
+.quick-switch-result.is-selected {
+  background-color: var(--color-bg-subtle);
+}
+
+.quick-switch-result-name {
+  display: block;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.quick-switch-result-path {
+  display: block;
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.quick-switch-mark {
   background-color: var(--color-mark);
   color: inherit;
 }
