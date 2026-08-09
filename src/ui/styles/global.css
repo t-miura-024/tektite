@@ -2034,11 +2034,14 @@ body {
 
 @media (min-width: 48rem) {
   .vault-workspace-shell .vault-screen {
-    grid-template-columns: 2.75rem 12.5rem minmax(0, 1fr) 0;
+    grid-template-columns: 2.75rem var(--vault-sidebar-width, 12.5rem) minmax(0, 1fr) 0;
   }
 
   .vault-workspace-shell .vault-screen:not(.is-right-collapsed) {
-    grid-template-columns: 2.75rem 12.5rem minmax(0, 1fr) minmax(13rem, 17rem);
+    grid-template-columns: 2.75rem var(--vault-sidebar-width, 12.5rem) minmax(0, 1fr) minmax(
+        13rem,
+        17rem
+      );
   }
 
   .vault-workspace-shell .vault-screen.is-left-collapsed.is-right-collapsed {
@@ -2050,7 +2053,30 @@ body {
   }
 }
 
+.vault-workspace-shell .vault-sidebar-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.vault-workspace-shell .vault-sidebar-resizer:hover,
+.vault-workspace-shell.is-resizing .vault-sidebar-resizer {
+  background: color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.vault-workspace-shell.is-resizing,
+.vault-workspace-shell.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
 .vault-workspace-shell .vault-sidebar {
+  position: relative;
   padding-inline: 12px;
 }
 

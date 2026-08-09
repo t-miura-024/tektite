@@ -68,6 +68,27 @@ function collectFilePaths(root: TreeDirectory): string[] {
   return paths;
 }
 
+const SIDEBAR_WIDTH_KEY = 'tektite.sidebar.width';
+const DEFAULT_SIDEBAR_WIDTH = 200;
+const MIN_SIDEBAR_WIDTH = 180;
+const MAX_SIDEBAR_WIDTH = 420;
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+}
+
+function readSidebarWidth(): number {
+  if (typeof window === 'undefined') {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+  try {
+    const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(stored) ? clampSidebarWidth(stored) : DEFAULT_SIDEBAR_WIDTH;
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
 interface OutlineHeading {
   readonly level: number;
   readonly text: string;
@@ -123,6 +144,8 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [rightPanel, setRightPanel] = useState<'outline' | 'backlinks'>('outline');
   const [outlineContent, setOutlineContent] = useState('');
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [resizingSidebar, setResizingSidebar] = useState(false);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -264,6 +287,30 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     setOutlineContent('');
   }, [notePath]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    } catch {
+      // localStorage may be unavailable in private browsing or restricted frames.
+    }
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!resizingSidebar) {
+      return;
+    }
+    const handlePointerMove = (event: PointerEvent): void => {
+      setSidebarWidth(clampSidebarWidth(event.clientX - 44));
+    };
+    const stopResizing = (): void => setResizingSidebar(false);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResizing, { once: true });
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResizing);
+    };
+  }, [resizingSidebar]);
+
   // ツリー取得後: ルートを展開し、ノートパス指定があれば祖先ディレクトリも展開する
   // （ディープリンクのリロードで選択状態を復元するため）
   useEffect(() => {
@@ -354,7 +401,8 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
 
   return (
     <div
-      className={`vault-screen${leftSidebarOpen ? '' : ' is-left-collapsed'}${rightSidebarOpen ? '' : ' is-right-collapsed'}`}
+      className={`vault-screen${leftSidebarOpen ? '' : ' is-left-collapsed'}${rightSidebarOpen ? '' : ' is-right-collapsed'}${resizingSidebar ? ' is-resizing' : ''}`}
+      style={{ '--vault-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
     >
       <nav className="workspace-rail" aria-label="ワークスペース">
         <button
@@ -497,6 +545,19 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
               />
             </>
           )}
+          <div
+            className="vault-sidebar-resizer"
+            role="separator"
+            aria-label="サイドバー幅を変更"
+            aria-orientation="vertical"
+            aria-valuemin={MIN_SIDEBAR_WIDTH}
+            aria-valuemax={MAX_SIDEBAR_WIDTH}
+            aria-valuenow={sidebarWidth}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              setResizingSidebar(true);
+            }}
+          />
         </aside>
       )}
       <section className="vault-content">
