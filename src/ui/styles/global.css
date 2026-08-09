@@ -1825,3 +1825,36 @@ body {
 .reading-content h3 {
   font-size: 1.35rem;
 }
+
+/* CodeMirror live preview: keep the editing surface visually close to Obsidian. */
+.note-editor .cm-gutters {
+  display: none;
+}
+
+.note-editor .cm-content {
+  padding: 2.1rem 3.2rem 4rem;
+  caret-color: var(--color-accent);
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+.note-editor .cm-line {
+  padding: 0;
+}
+
+.note-editor .tk-heading-marker {
+  display: none;
+}
+
+.note-editor .tk-heading {
+  color: #ff5b5b;
+}
+
+.note-editor .cm-line:has(.tk-heading) {
+  padding-block: 0.65rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-fg-muted) 25%, transparent);
+}
+
+.note-editor .cm-line:has(.tk-heading-1) {
+  margin-block-start: 0.8rem;
+}
