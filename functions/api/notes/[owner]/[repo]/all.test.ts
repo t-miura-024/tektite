@@ -217,6 +217,34 @@ describe('GET /api/notes/:owner/:repo/all', () => {
     expect((await readJson(response)).truncated).toBe(true);
   });
 
+  it('空リポジトリ（Trees API 404）は空の notes で 200 を返す（M2）', async () => {
+    mocks.githubApiFetch.mockImplementation(async (_baseUrl: string, path: string) => {
+      if (path === '/repos/octocat/notes') {
+        return new Response(JSON.stringify({ default_branch: 'main' }), { status: 200 });
+      }
+      if (path.startsWith('/repos/octocat/notes/git/trees/')) {
+        return new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 });
+      }
+      return new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 });
+    });
+
+    const response = await onRequestGet(getContext());
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toEqual({
+      owner: 'octocat',
+      name: 'notes',
+      defaultBranch: 'main',
+      truncated: false,
+      notes: [],
+    });
+    // 空のため Blob 取得は 1 回も呼ばれない
+    const blobCalls = mocks.githubApiFetch.mock.calls.filter(([, path]) =>
+      String(path).includes('/git/blobs/'),
+    );
+    expect(blobCalls).toHaveLength(0);
+  });
+
   it('未認証は 401 を返し、GitHub API を呼ばない', async () => {
     mocks.authenticateRequest.mockResolvedValue({
       ok: false,

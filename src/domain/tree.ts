@@ -68,6 +68,23 @@ export function ancestorDirectoryPaths(filePath: string): readonly string[] {
   return ancestors;
 }
 
+/** パスの親ディレクトリ（ルート直下は ''）。ファイル操作の移動先計算に使う */
+export function parentDirectoryPath(path: string): string {
+  const index = path.lastIndexOf('/');
+  return index === -1 ? '' : path.slice(0, index);
+}
+
+/** パスの末尾セグメント（ファイル名 / ディレクトリ名） */
+export function pathBaseName(path: string): string {
+  const index = path.lastIndexOf('/');
+  return index === -1 ? path : path.slice(index + 1);
+}
+
+/** ディレクトリと名前を結合する（ルート直下は名前のみ） */
+export function joinDirectoryPath(directory: string, name: string): string {
+  return directory === '' ? name : `${directory}/${name}`;
+}
+
 function compareByName(a: { name: string }, b: { name: string }): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 }

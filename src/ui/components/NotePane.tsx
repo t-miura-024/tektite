@@ -22,6 +22,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 
 import { clearDraft, loadDraft, saveDraft } from '@/application/draft';
 import type { Draft } from '@/application/draft';
+import { uploadImage } from '@/application/file';
 import { NoteSaveError, openNote, saveNoteContent } from '@/application/note';
 import type { NoteContent } from '@/application/note';
 import { run } from '@/composition';
@@ -32,7 +33,8 @@ import type { VaultRef } from '@/domain/vault';
 import { ConflictPanel } from '@/ui/components/ConflictPanel';
 import { NoteEditor } from '@/ui/components/NoteEditor';
 import { ReadingView } from '@/ui/components/ReadingView';
-import { noteErrorMessage, noteSaveErrorMessage } from '@/ui/note-error';
+import { fileToBase64, imageFileName } from '@/ui/image-upload';
+import { fileErrorMessage, noteErrorMessage, noteSaveErrorMessage } from '@/ui/note-error';
 import { navigate, noteRoutePath, NAVIGATE_EVENT_NAME } from '@/ui/router';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError } from '@/ui/vault-error';
@@ -50,6 +52,11 @@ export interface NotePaneProps {
    * VaultScreen が記法索引のキャッシュを更新するために使う（再取得なし）。
    */
   onNoteSaved?: (path: string, content: string) => void;
+  /**
+   * 画像アップロード成功時に呼ばれる。VaultScreen がツリーを再読込して
+   * 新しい添付ファイルをツリー・Embed 解決へ反映するために使う。
+   */
+  onFileChanged?: () => void;
 }
 
 /**
@@ -94,6 +101,7 @@ export function NotePane({
   notify,
   onSessionExpired,
   onNoteSaved,
+  onFileChanged,
 }: NotePaneProps) {
   const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading' });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('clean');
@@ -209,6 +217,36 @@ export function NotePane({
       flushDraft(content);
     },
     [setDirty, flushDraft],
+  );
+
+  /**
+   * 画像のペースト / ドロップ時のアップロード（M2）。
+   * File を base64 に変換して application 層の uploadImage（一括コミット）で
+   * `attachments/` へ保存し、エディタが `![[パス]]` を挿入する。成功時はツリー
+   * 再読込（onFileChanged）を依頼して Embed 解決・ツリー表示へ反映する。
+   * 失敗はトーストで通知し null を返す（エディタは本文を変更しない）。
+   */
+  const handleUploadImage = useCallback(
+    async (file: File): Promise<string | null> => {
+      try {
+        const base64 = await fileToBase64(file);
+        const result = await run(
+          uploadImage({ owner, name }, { fileName: imageFileName(file), base64 }),
+        );
+        notify('画像をアップロードしました。');
+        onFileChanged?.();
+        return result.path;
+      } catch (error) {
+        if (isSessionExpiredError(error)) {
+          notify('セッションの有効期限が切れました。ログインし直してください。');
+          onSessionExpired();
+          return null;
+        }
+        notify(fileErrorMessage(error));
+        return null;
+      }
+    },
+    [owner, name, notify, onSessionExpired, onFileChanged],
   );
 
   /**
@@ -557,6 +595,7 @@ export function NotePane({
             initialContent={editorContent}
             filePaths={filePaths}
             onWikilinkClick={handleWikilinkClick}
+            onUploadImage={handleUploadImage}
             onContentChange={handleContentChange}
             onBlur={handleEditorBlur}
             onReady={handleEditorReady}

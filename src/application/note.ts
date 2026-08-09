@@ -100,6 +100,58 @@ export interface NoteSaveRequest {
 }
 
 /**
+ * 一括コミットの変更 1 件（M5: ファイル操作）。
+ *
+ * - create / update: path に本文（UTF-8）を置く。base64 化は infra 層が行う
+ * - create-binary: 画像などバイナリを標準 base64（btoa 互換）のまま置く
+ *   （UTF-8 テキスト経由にすると二重エンコードで壊れるため。M2 画像アップロード）
+ * - delete: path のファイルを削除する（GitHub 上の実削除）
+ * - move: from（path）を to へ移動する。本文は転送せず、サーバー側が base tree
+ *   の blob sha を再利用する（添付ファイルなど本文をクライアントに持たない
+ *   ファイルもディレクトリ移動で正しく動く。M5 方針 2 の一括コミット）
+ */
+export type FileChange =
+  | { readonly op: 'create'; readonly path: string; readonly content: string }
+  | { readonly op: 'create-binary'; readonly path: string; readonly base64: string }
+  | { readonly op: 'update'; readonly path: string; readonly content: string }
+  | { readonly op: 'delete'; readonly path: string }
+  | { readonly op: 'move'; readonly path: string; readonly to: string };
+
+/** 一括コミットの入力（changes を 1 コミットに束ねる） */
+export interface CommitChangesInput {
+  readonly changes: readonly FileChange[];
+  readonly message: string;
+}
+
+/** 一括コミットの結果 */
+export interface CommitResult {
+  readonly owner: string;
+  readonly name: string;
+  readonly branch: string;
+  readonly commitSha: string;
+}
+
+/** 一括コミットエラーの種類（ノート保存と同じ kind 合併型） */
+export type FileCommitErrorKind =
+  | 'unauthenticated'
+  | 'rate_limited'
+  | 'conflict'
+  | 'not_found'
+  | 'server'
+  | 'network';
+
+/** 一括コミットの通信・検証で発生するエラー */
+export class FileCommitError extends Error {
+  readonly kind: FileCommitErrorKind;
+
+  constructor(kind: FileCommitErrorKind, message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'FileCommitError';
+    this.kind = kind;
+  }
+}
+
+/**
  * ポート: ノート本文と sha の取得・保存（Effect Service）。
  * src/infra/github の NoteGatewayLive（Pages Functions 経由）が実装する。
  */
@@ -114,6 +166,14 @@ export interface NoteGateway {
     notePath: string,
     request: NoteSaveRequest,
   ) => Effect.Effect<NoteSaveResult, NoteSaveError>;
+  /**
+   * 複数ファイルの変更（作成/更新/削除/移動）を単一コミットで適用する（M5）。
+   * リネーム/移動に伴うリンク張り替えは必ずこの一括コミットに束ねる（方針 2）。
+   */
+  readonly commitChanges: (
+    ref: VaultRef,
+    input: CommitChangesInput,
+  ) => Effect.Effect<CommitResult, FileCommitError>;
 }
 export const NoteGateway = Context.GenericTag<NoteGateway>('tektite/NoteGateway');
 
