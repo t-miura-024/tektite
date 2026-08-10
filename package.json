@@ -14,6 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "visual:compare": "node scripts/visual-parity/compare.mjs",
+    "visual:compare-dom": "node scripts/visual-parity/compare-dom.mjs",
+    "visual:compare-regions": "node scripts/visual-parity/compare-regions.mjs",
     "test:e2e": "bddgen && playwright test",
     "deploy": "wrangler pages deploy dist --project-name tektite"
   },
