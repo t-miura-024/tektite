@@ -2080,6 +2080,11 @@ body {
   padding-inline: 12px;
 }
 
+.vault-workspace-shell .vault-sidebar-header,
+.vault-workspace-shell .vault-branch {
+  display: none;
+}
+
 .vault-workspace-shell .file-tree,
 .vault-workspace-shell .file-tree-group,
 .vault-workspace-shell .file-tree-item,
