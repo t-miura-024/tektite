@@ -2082,6 +2082,17 @@ body {
   padding-inline: 12px;
 }
 
+.vault-workspace-shell .sidebar-workspace-tab {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  margin-inline: -12px;
+  padding-inline: 12px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-accent);
+  font-size: 16px;
+}
+
 .vault-workspace-shell .vault-sidebar-header,
 .vault-workspace-shell .vault-branch {
   display: none;

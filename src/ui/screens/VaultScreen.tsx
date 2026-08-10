@@ -484,6 +484,9 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       </nav>
       {leftSidebarOpen && (
         <aside className="vault-sidebar">
+          <div className="sidebar-workspace-tab" aria-label="ファイルエクスプローラ">
+            <span aria-hidden="true">▣</span>
+          </div>
           <div className="vault-sidebar-header">
             <Link to="/" className="vault-back-link">
               ← Vault 一覧
