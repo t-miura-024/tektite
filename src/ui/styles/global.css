@@ -2210,3 +2210,20 @@ body {
   stroke-linejoin: round;
   stroke-width: 1.6;
 }
+
+.vault-workspace-shell .workspace-rail {
+  height: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+  gap: 6px;
+  padding: 40px 7px 0;
+  overflow: hidden;
+}
+
+.vault-workspace-shell .workspace-rail-button {
+  width: 30px;
+  height: 26px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 16px;
+}
