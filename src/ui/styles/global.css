@@ -422,7 +422,8 @@ body {
 .workspace-tabs {
   display: flex;
   align-items: stretch;
-  min-height: 2.35rem;
+  min-height: 40px;
+  height: 40px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-subtle);
 }
@@ -431,7 +432,8 @@ body {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  min-height: 2.25rem;
+  min-height: 38.4px;
+  height: 38.4px;
   padding: 0 0.65rem;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-fg-muted);
@@ -1833,11 +1835,11 @@ body {
 }
 
 .reading-view {
-  padding: 2.1rem 3.2rem 4rem;
+  padding: 0 48px 64px;
 }
 
 .reading-inline-title {
-  margin: 0 0 16px;
+  margin: 8px 0 16px;
   padding-top: 16px;
   color: #ff5b5b;
   font-size: 32px;
@@ -1882,7 +1884,7 @@ body {
 }
 
 .note-editor .cm-content {
-  padding: 2.1rem 3.2rem 4rem;
+  padding: 0 48px 64px;
   caret-color: var(--color-accent);
   font-size: 1rem;
   line-height: 24px;
@@ -1910,7 +1912,7 @@ body {
 }
 
 .editor-inline-title {
-  margin: 0 3.2rem 16px;
+  margin: 8px 48px 16px;
   padding-top: 16px;
   color: #ff5b5b;
   font-size: 32px;
