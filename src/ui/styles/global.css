@@ -1926,9 +1926,13 @@ body {
 }
 
 .note-editor .cm-line:has(.tk-heading-3):has(.tk-tag) {
-  margin-top: 40px;
+  margin-top: 0;
   padding-left: 60px;
   padding-bottom: 0;
+}
+
+.note-editor .cm-line.tk-card-heading-first {
+  margin-top: 40px;
 }
 
 .note-editor .tk-tag,

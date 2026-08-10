@@ -115,6 +115,7 @@ export function computeDecorationSet(doc: Text): DecorationSet {
     ...htmlCommentRanges(text),
     ...frontmatterRanges(text),
     ...frontmatterFieldMarks(text),
+    ...cardHeadingRanges(text),
     ...htmlBreakRanges(text),
   ].toSorted((a, b) => a.from - b.from || Number(a.line) * -1 - Number(b.line) * -1);
   for (const range of ranges) {
@@ -189,6 +190,32 @@ function frontmatterFieldMarks(text: string): Array<{
           });
         }
       }
+    }
+    offset += line.length + 1;
+  }
+  return ranges;
+}
+
+function cardHeadingRanges(text: string): Array<{
+  from: number;
+  to: number;
+  line: true;
+  value: Decoration;
+}> {
+  const ranges: Array<{ from: number; to: number; line: true; value: Decoration }> = [];
+  let offset = 0;
+  let first = true;
+  for (const line of text.split('\n')) {
+    if (/^#{1,6}\s+.*#card\s*$/.test(line)) {
+      ranges.push({
+        from: offset,
+        to: offset,
+        line: true,
+        value: Decoration.line({
+          class: first ? 'tk-card-heading-first' : 'tk-card-heading',
+        }),
+      });
+      first = false;
     }
     offset += line.length + 1;
   }
