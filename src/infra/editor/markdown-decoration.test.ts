@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   computeDecorationSet,
+  FrontmatterPropertyWidget,
   HtmlBreakWidget,
   TaskCheckboxWidget,
 } from '@/infra/editor/markdown-decoration';
@@ -11,7 +12,7 @@ interface Found {
   readonly from: number;
   readonly to: number;
   readonly className?: string;
-  readonly widget?: TaskCheckboxWidget | HtmlBreakWidget;
+  readonly widget?: TaskCheckboxWidget | HtmlBreakWidget | FrontmatterPropertyWidget;
 }
 
 /** ドキュメントの装飾セットをクラス名と位置のリストに変換する */
@@ -22,7 +23,7 @@ function collect(docText: string): Found[] {
   decos.between(0, doc.length, (from, to, value) => {
     const spec = value.spec as {
       class?: string;
-      widget?: TaskCheckboxWidget | HtmlBreakWidget;
+      widget?: TaskCheckboxWidget | HtmlBreakWidget | FrontmatterPropertyWidget;
     };
     found.push({ from, to, className: spec.class, widget: spec.widget });
   });

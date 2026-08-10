@@ -56,6 +56,20 @@ export class HtmlBreakWidget extends WidgetType {
   }
 }
 
+export class FrontmatterPropertyWidget extends WidgetType {
+  override toDOM(): HTMLElement {
+    const icon = document.createElement('span');
+    icon.className = 'tk-frontmatter-property-icon';
+    icon.textContent = '☷';
+    icon.setAttribute('aria-hidden', 'true');
+    return icon;
+  }
+
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
 /** 解析結果 1 件を対応する Decoration に変換する */
 function toDecoration(d: MarkdownDecoration): Decoration {
   switch (d.type) {
@@ -174,9 +188,21 @@ function frontmatterFieldMarks(text: string): Array<{
       if (separator > 0) {
         ranges.push({
           from: offset,
+          to: offset,
+          line: false,
+          value: Decoration.widget({ widget: new FrontmatterPropertyWidget() }),
+        });
+        ranges.push({
+          from: offset,
           to: offset + separator,
           line: false,
           value: Decoration.mark({ class: 'tk-frontmatter-field-key' }),
+        });
+        ranges.push({
+          from: offset + separator,
+          to: offset + separator + 1,
+          line: false,
+          value: Decoration.mark({ class: 'tk-frontmatter-field-separator' }),
         });
         const valueStart = offset + separator + 1;
         const value = line.slice(separator + 1).match(/^\s*(.*)$/)?.[1] ?? '';
