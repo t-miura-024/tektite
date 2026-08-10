@@ -91,18 +91,51 @@ function toDecoration(d: MarkdownDecoration): Decoration {
  */
 export function computeDecorationSet(doc: Text): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  const decorations = parseMarkdownDecorations(doc.toString()).toSorted(
+  const text = doc.toString();
+  const decorations = parseMarkdownDecorations(text).toSorted(
     (a, b) => a.from - b.from || startSide(a) - startSide(b),
   );
-  for (const d of decorations) {
+  const ranges = [
+    ...decorations.map((decoration) => ({
+      from: decoration.from,
+      to: decoration.to,
+      line: isLineType(decoration.type),
+      value: toDecoration(decoration),
+    })),
+    ...htmlCommentRanges(text),
+  ].toSorted((a, b) => a.from - b.from || Number(a.line) * -1 - Number(b.line) * -1);
+  for (const range of ranges) {
     // LineDecoration はゼロ長で追加する（CM6 の制約: 行全体への適用は from の行で決まる）
-    if (isLineType(d.type)) {
-      builder.add(d.from, d.from, toDecoration(d));
+    if (range.line) {
+      builder.add(range.from, range.from, range.value);
     } else {
-      builder.add(d.from, d.to, toDecoration(d));
+      builder.add(range.from, range.to, range.value);
     }
   }
   return builder.finish();
+}
+
+function htmlCommentRanges(text: string): Array<{
+  from: number;
+  to: number;
+  line: false;
+  value: Decoration;
+}> {
+  const ranges: Array<{ from: number; to: number; line: false; value: Decoration }> = [];
+  const comments = /<!--[\s\S]*?-->/g;
+  for (const match of text.matchAll(comments)) {
+    const from = match.index;
+    if (from === undefined) {
+      continue;
+    }
+    ranges.push({
+      from,
+      to: from + match[0].length,
+      line: false,
+      value: Decoration.mark({ class: 'tk-html-comment' }),
+    });
+  }
+  return ranges;
 }
 
 /** 行全体に適用する装飾種別（Decoration.line を使う） */
@@ -142,6 +175,7 @@ export const markdownDecoration = StateField.define<DecorationSet>({
 
 /** 装飾クラスのスタイル。アプリの CSS 変数に追従しダークモードでも整合する */
 export const markdownDecorationTheme = EditorView.baseTheme({
+  '.tk-html-comment': { color: '#6f80b5' },
   '.tk-heading-marker': { color: 'var(--color-fg-muted)' },
   '.tk-heading': { fontWeight: '700', color: 'var(--color-fg)' },
   '.tk-heading-1': { fontSize: '1.6em', lineHeight: 1.25 },

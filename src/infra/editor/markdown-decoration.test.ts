@@ -74,4 +74,8 @@ describe('CM6 ライブプレビュー装飾（decoration 変換）', () => {
   it('空のドキュメントは空の decoration セットになる', () => {
     expect(collect('')).toEqual([]);
   });
+
+  it('HTML コメントをライブプレビュー用のコメント装飾に変換する', () => {
+    expect(collect('<!-- meta -->')).toEqual([{ from: 0, to: 13, className: 'tk-html-comment' }]);
+  });
 });
