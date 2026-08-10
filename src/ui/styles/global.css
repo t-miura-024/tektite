@@ -2128,3 +2128,42 @@ body {
   font-size: 16px;
   line-height: 1;
 }
+
+.vault-workspace-shell .file-tree-toolbar {
+  gap: 2px;
+  flex-wrap: nowrap;
+}
+
+.vault-workspace-shell .file-tree-toolbar .button-secondary {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  font-size: 0;
+}
+
+.vault-workspace-shell .file-tree-action-button::before {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.vault-workspace-shell .file-tree-action-button[aria-label='検索']::before {
+  content: '⌕';
+}
+
+.vault-workspace-shell .file-tree-action-button[aria-label='移動']::before {
+  content: '⌘';
+  font-size: 12px;
+}
+
+.vault-workspace-shell .file-tree-action-button[aria-label='現在のNoteを表示']::before {
+  content: '◎';
+}
+
+.vault-workspace-shell .file-tree-action-button[aria-label='すべて展開']::before {
+  content: '⌄';
+}
+
+.vault-workspace-shell .file-tree-toolbar button:disabled {
+  opacity: 0.35;
+}

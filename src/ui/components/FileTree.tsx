@@ -37,6 +37,10 @@ export interface FileTreeProps {
   onCreateNote: (name: string) => void;
   /** 新規フォルダー（ルート直下）をコミットする */
   onCreateDirectory: (name: string) => void;
+  onOpenSearch?: () => void;
+  onOpenQuickSwitcher?: () => void;
+  onRevealCurrent?: () => void;
+  onExpandAll?: () => void;
   /** リネーム（newName は 1 セグメントの新しい名前）をコミットする */
   onRename: (path: string, type: 'file' | 'directory', newName: string) => void;
   /** 移動（targetDirectory は '' でルート）をコミットする */
@@ -104,6 +108,10 @@ export function FileTree({
   onToggleDirectory,
   onCreateNote,
   onCreateDirectory,
+  onOpenSearch,
+  onOpenQuickSwitcher,
+  onRevealCurrent,
+  onExpandAll,
   onRename,
   onMove,
   onDelete,
@@ -250,6 +258,8 @@ export function FileTree({
           type="button"
           className="button-secondary"
           data-testid="file-create-note-button"
+          aria-label="新規ノート"
+          title="新規ノート"
           onClick={() => openCreate('note')}
         >
           ＋ 新規ノート
@@ -258,9 +268,48 @@ export function FileTree({
           type="button"
           className="button-secondary"
           data-testid="file-create-directory-button"
+          aria-label="新規フォルダー"
+          title="新規フォルダー"
           onClick={() => openCreate('directory')}
         >
           ＋ 新規フォルダー
+        </button>
+        <button
+          type="button"
+          className="button-secondary file-tree-action-button"
+          aria-label="検索"
+          title="検索 ⌘K"
+          onClick={() => onOpenSearch?.()}
+        >
+          検索
+        </button>
+        <button
+          type="button"
+          className="button-secondary file-tree-action-button"
+          aria-label="移動"
+          title="移動 ⌘O"
+          onClick={() => onOpenQuickSwitcher?.()}
+        >
+          移動
+        </button>
+        <button
+          type="button"
+          className="button-secondary file-tree-action-button"
+          aria-label="現在のNoteを表示"
+          title="現在のNoteを表示"
+          disabled={selectedPath === null}
+          onClick={() => onRevealCurrent?.()}
+        >
+          ◎
+        </button>
+        <button
+          type="button"
+          className="button-secondary file-tree-action-button"
+          aria-label="すべて展開"
+          title="すべて展開"
+          onClick={() => onExpandAll?.()}
+        >
+          ⌄
         </button>
       </div>
       {creating !== null && (

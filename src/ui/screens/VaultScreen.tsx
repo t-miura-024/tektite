@@ -68,6 +68,20 @@ function collectFilePaths(root: TreeDirectory): string[] {
   return paths;
 }
 
+function collectDirectoryPaths(root: TreeDirectory): string[] {
+  const paths: string[] = [''];
+  const walk = (directory: TreeDirectory): void => {
+    for (const child of directory.children) {
+      if (child.type === 'directory') {
+        paths.push(child.path);
+        walk(child);
+      }
+    }
+  };
+  walk(root);
+  return paths;
+}
+
 const SIDEBAR_WIDTH_KEY = 'tektite.sidebar.width';
 const DEFAULT_SIDEBAR_WIDTH = 200;
 const MIN_SIDEBAR_WIDTH = 180;
@@ -341,6 +355,25 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     });
   }, []);
 
+  const revealCurrentNote = useCallback((): void => {
+    if (notePath === null) {
+      return;
+    }
+    setExpandedPaths((previous) => {
+      const next = new Set(previous);
+      for (const ancestor of ancestorDirectoryPaths(notePath)) {
+        next.add(ancestor);
+      }
+      return next;
+    });
+  }, [notePath]);
+
+  const expandAllDirectories = useCallback((): void => {
+    if (state.kind === 'ready') {
+      setExpandedPaths(new Set(collectDirectoryPaths(state.tree.root)));
+    }
+  }, [state]);
+
   // ツリーが取得できている間だけ全ファイルパスを算出する（リーディング表示と
   // ファイル操作のリンク張り替え入力に使う）
   const filePaths = useMemo(
@@ -425,9 +458,6 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
         <button type="button" className="workspace-rail-button" aria-label="ブックマーク">
           ♡
         </button>
-        <button type="button" className="workspace-rail-button" aria-label="グラフビュー">
-          ⌘
-        </button>
         <button type="button" className="workspace-rail-button" aria-label="データベース">
           ▦
         </button>
@@ -455,22 +485,6 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
               ← Vault 一覧
             </Link>
             <h2 className="vault-title">{vaultRefFullName(vaultRef)}</h2>
-            <div className="vault-header-actions">
-              <button
-                type="button"
-                className="button-secondary search-open-button"
-                onClick={() => setSearchOpen(true)}
-              >
-                検索 <span className="search-open-shortcut">⌘K</span>
-              </button>
-              <button
-                type="button"
-                className="button-secondary search-open-button"
-                onClick={() => setQuickSwitchOpen(true)}
-              >
-                移動 <span className="search-open-shortcut">⌘O</span>
-              </button>
-            </div>
           </div>
           {state.kind === 'loading' && (
             <p className="app-placeholder" role="status">
@@ -504,6 +518,10 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
                 expandedPaths={expandedPaths}
                 selectedPath={notePath}
                 onToggleDirectory={toggleDirectory}
+                onOpenSearch={() => setSearchOpen(true)}
+                onOpenQuickSwitcher={() => setQuickSwitchOpen(true)}
+                onRevealCurrent={revealCurrentNote}
+                onExpandAll={expandAllDirectories}
                 onCreateNote={(noteName) =>
                   void runFileOperation(
                     { kind: 'create-note', path: noteName },
