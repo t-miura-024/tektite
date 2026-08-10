@@ -1740,8 +1740,8 @@ body {
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --color-bg: #20212e;
-    --color-bg-subtle: #28293a;
+    --color-bg: #272a37;
+    --color-bg-subtle: #2a2b39;
     --color-fg: #f2f3f5;
     --color-fg-muted: #a7a9b8;
     --color-border: #3b3d52;
@@ -1751,8 +1751,8 @@ body {
 }
 
 :root[data-theme='dark'] {
-  --color-bg: #20212e;
-  --color-bg-subtle: #28293a;
+  --color-bg: #272a37;
+  --color-bg-subtle: #2a2b39;
   --color-fg: #f2f3f5;
   --color-fg-muted: #a7a9b8;
   --color-border: #3b3d52;
@@ -1762,8 +1762,8 @@ body {
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --color-bg: #20212e;
-    --color-bg-subtle: #28293a;
+    --color-bg: #272a37;
+    --color-bg-subtle: #2a2b39;
     --color-fg: #f2f3f5;
     --color-fg-muted: #a7a9b8;
     --color-border: #3b3d52;
