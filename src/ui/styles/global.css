@@ -1931,7 +1931,7 @@ body {
   padding-bottom: 0;
 }
 
-.note-editor .cm-line.tk-card-heading-first {
+.note-editor .cm-line.tk-card-heading-first:has(.tk-heading-3):has(.tk-tag) {
   margin-top: 40px;
 }
 
