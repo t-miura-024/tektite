@@ -1839,7 +1839,7 @@ body {
 }
 
 .reading-inline-title {
-  margin: 8px 0 16px;
+  margin: 8px 63px 16px 48px;
   padding-top: 16px;
   color: #ff5555;
   font-size: 32px;
@@ -1920,7 +1920,7 @@ body {
 }
 
 .editor-inline-title {
-  margin: 8px 48px 16px;
+  margin: 8px 63px 16px 48px;
   padding-top: 16px;
   color: #ff5555;
   font-size: 32px;
