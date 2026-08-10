@@ -1899,6 +1899,8 @@ body {
 }
 
 .note-editor .tk-heading {
+  position: relative;
+  left: -4px;
   color: #ff5555;
 }
 
