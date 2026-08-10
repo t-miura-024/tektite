@@ -1837,17 +1837,18 @@ body {
 }
 
 .reading-inline-title {
-  margin: 0 0 1.4rem;
+  margin: 0 0 16px;
+  padding-top: 16px;
   color: #ff5b5b;
-  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  font-size: 32px;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 38.4px;
 }
 
 .reading-content {
   max-width: none;
   color: var(--color-fg-muted);
-  line-height: 1.75;
+  line-height: 24px;
 }
 
 .reading-content h1,
@@ -1884,7 +1885,7 @@ body {
   padding: 2.1rem 3.2rem 4rem;
   caret-color: var(--color-accent);
   font-size: 1rem;
-  line-height: 1.75;
+  line-height: 24px;
 }
 
 .note-editor .cm-line {
@@ -1909,11 +1910,12 @@ body {
 }
 
 .editor-inline-title {
-  margin: 2.1rem 3.2rem 1.4rem;
+  margin: 0 3.2rem 16px;
+  padding-top: 16px;
   color: #ff5b5b;
-  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  font-size: 32px;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 38.4px;
 }
 
 /* Vault workspaces use the tab strip as the top chrome, like Obsidian. */
