@@ -103,6 +103,7 @@ export function computeDecorationSet(doc: Text): DecorationSet {
       value: toDecoration(decoration),
     })),
     ...htmlCommentRanges(text),
+    ...frontmatterRanges(text),
   ].toSorted((a, b) => a.from - b.from || Number(a.line) * -1 - Number(b.line) * -1);
   for (const range of ranges) {
     // LineDecoration はゼロ長で追加する（CM6 の制約: 行全体への適用は from の行で決まる）
@@ -113,6 +114,37 @@ export function computeDecorationSet(doc: Text): DecorationSet {
     }
   }
   return builder.finish();
+}
+
+function frontmatterRanges(text: string): Array<{
+  from: number;
+  to: number;
+  line: true;
+  value: Decoration;
+}> {
+  const lines = text.split('\n');
+  if ((lines[0] ?? '').trim() !== '---') {
+    return [];
+  }
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+  if (end < 0) {
+    return [];
+  }
+  const ranges = [];
+  let offset = 0;
+  for (let index = 0; index <= end; index += 1) {
+    const delimiter = index === 0 || index === end;
+    ranges.push({
+      from: offset,
+      to: offset,
+      line: true as const,
+      value: Decoration.line({
+        class: delimiter ? 'tk-frontmatter-delimiter' : 'tk-frontmatter-field',
+      }),
+    });
+    offset += (lines[index] ?? '').length + 1;
+  }
+  return ranges;
 }
 
 function htmlCommentRanges(text: string): Array<{

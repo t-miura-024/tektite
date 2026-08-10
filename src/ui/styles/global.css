@@ -1919,6 +1919,55 @@ body {
   line-height: 38.4px;
 }
 
+.note-editor .tk-heading-3 {
+  color: #f1fa8c;
+  font-size: 24px;
+  line-height: 28px;
+}
+
+.note-editor .cm-line:has(.tk-heading-3):has(.tk-tag) {
+  padding-left: 60px;
+  padding-bottom: 0;
+}
+
+.note-editor .tk-tag,
+.note-editor .tk-tag .tk-heading-3 {
+  color: #949fbe;
+  font-size: 24px;
+  line-height: 28px;
+}
+
+.note-editor .tk-tag {
+  padding: 0 0.35em;
+  border: 1px solid #3b3d52;
+  border-radius: 999px;
+  background: rgba(59, 61, 82, 0.55);
+}
+
+.note-editor .cm-line.tk-frontmatter-delimiter {
+  display: none;
+}
+
+.note-editor .cm-line.tk-frontmatter-field {
+  margin-block: 8px 16px;
+  padding: 0;
+  color: var(--color-fg-muted);
+}
+
+.note-editor .cm-line.tk-frontmatter-field::before {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-fg);
+  content: 'プロパティ';
+}
+
+.note-editor .cm-line.tk-frontmatter-field::after {
+  display: block;
+  margin-top: 8px;
+  color: var(--color-fg-muted);
+  content: '+ プロパティを追加';
+}
+
 .editor-inline-title {
   margin: 8px 63px 16px 48px;
   padding-top: 16px;

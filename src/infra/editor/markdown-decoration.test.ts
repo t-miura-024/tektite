@@ -78,4 +78,11 @@ describe('CM6 ライブプレビュー装飾（decoration 変換）', () => {
   it('HTML コメントをライブプレビュー用のコメント装飾に変換する', () => {
     expect(collect('<!-- meta -->')).toEqual([{ from: 0, to: 13, className: 'tk-html-comment' }]);
   });
+
+  it('先頭Frontmatterをプロパティ装飾へ変換する', () => {
+    const found = collect('---\nkey: value\n---\n本文');
+    expect(found).toContainEqual({ from: 0, to: 0, className: 'tk-frontmatter-delimiter' });
+    expect(found).toContainEqual({ from: 4, to: 4, className: 'tk-frontmatter-field' });
+    expect(found).toContainEqual({ from: 15, to: 15, className: 'tk-frontmatter-delimiter' });
+  });
 });
