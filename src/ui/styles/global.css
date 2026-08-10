@@ -1950,12 +1950,13 @@ body {
 
 .note-editor .cm-line.tk-frontmatter-field {
   margin-block: 8px 16px;
-  padding: 0;
+  padding: 0 0 0 24px;
   color: var(--color-fg-muted);
 }
 
 .note-editor .cm-line.tk-frontmatter-field::before {
   display: block;
+  margin-left: -24px;
   margin-bottom: 8px;
   color: var(--color-fg);
   content: 'プロパティ';
@@ -1963,9 +1964,20 @@ body {
 
 .note-editor .cm-line.tk-frontmatter-field::after {
   display: block;
+  margin-left: -24px;
   margin-top: 8px;
   color: var(--color-fg-muted);
   content: '+ プロパティを追加';
+}
+
+.note-editor .tk-frontmatter-field-key {
+  display: inline-block;
+  min-width: 124px;
+  color: #949fbe;
+}
+
+.note-editor .tk-frontmatter-field-value {
+  color: var(--color-fg);
 }
 
 .editor-inline-title {

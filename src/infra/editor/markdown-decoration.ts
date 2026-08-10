@@ -114,6 +114,7 @@ export function computeDecorationSet(doc: Text): DecorationSet {
     })),
     ...htmlCommentRanges(text),
     ...frontmatterRanges(text),
+    ...frontmatterFieldMarks(text),
     ...htmlBreakRanges(text),
   ].toSorted((a, b) => a.from - b.from || Number(a.line) * -1 - Number(b.line) * -1);
   for (const range of ranges) {
@@ -145,6 +146,51 @@ function htmlBreakRanges(text: string): Array<{
       line: false,
       value: Decoration.replace({ widget: new HtmlBreakWidget() }),
     });
+  }
+  return ranges;
+}
+
+function frontmatterFieldMarks(text: string): Array<{
+  from: number;
+  to: number;
+  line: false;
+  value: Decoration;
+}> {
+  const lines = text.split('\n');
+  if ((lines[0] ?? '').trim() !== '---') {
+    return [];
+  }
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+  if (end < 0) {
+    return [];
+  }
+  const ranges: Array<{ from: number; to: number; line: false; value: Decoration }> = [];
+  let offset = 0;
+  for (let index = 0; index <= end; index += 1) {
+    const line = lines[index] ?? '';
+    if (index > 0 && index < end) {
+      const separator = line.indexOf(':');
+      if (separator > 0) {
+        ranges.push({
+          from: offset,
+          to: offset + separator,
+          line: false,
+          value: Decoration.mark({ class: 'tk-frontmatter-field-key' }),
+        });
+        const valueStart = offset + separator + 1;
+        const value = line.slice(separator + 1).match(/^\s*(.*)$/)?.[1] ?? '';
+        if (value.length > 0) {
+          const valueFrom = valueStart + line.slice(separator + 1).indexOf(value);
+          ranges.push({
+            from: valueFrom,
+            to: valueFrom + value.length,
+            line: false,
+            value: Decoration.mark({ class: 'tk-frontmatter-field-value' }),
+          });
+        }
+      }
+    }
+    offset += line.length + 1;
   }
   return ranges;
 }
