@@ -2227,3 +2227,14 @@ body {
   border-radius: 4px;
   font-size: 16px;
 }
+
+.vault-workspace-shell .workspace-rail-button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}

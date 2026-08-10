@@ -120,6 +120,33 @@ function collectOutline(content: string): readonly OutlineHeading[] {
   });
 }
 
+type WorkspaceIconName =
+  | 'files'
+  | 'search'
+  | 'bookmark'
+  | 'database'
+  | 'calendar'
+  | 'command'
+  | 'sidebar';
+
+function WorkspaceIcon({ name }: { name: WorkspaceIconName }) {
+  const paths: Record<WorkspaceIconName, string> = {
+    files: 'M3 4.5h14v11H3z M6 2.5h8v2H6z M6 8h8 M6 11h5',
+    search: 'm14 14 3.5 3.5 M15 9.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0Z',
+    bookmark: 'M5 3.5h10v13l-5-3-5 3z',
+    database:
+      'M4 5c0-1.1 2.2-2 5-2s5 .9 5 2-2.2 2-5 2-5-.9-5-2Z M4 5v5c0 1.1 2.2 2 5 2s5-.9 5-2V5 M4 10v5c0 1.1 2.2 2 5 2s5-.9 5-2v-5',
+    calendar: 'M4 4h12v12H4z M7 2.5v3 M13 2.5v3 M4 8h12',
+    command: 'M5 5l5 5-5 5 M11 15h4',
+    sidebar: 'M3 3.5h14v13H3z M12 3.5v13',
+  };
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d={paths[name]} />
+    </svg>
+  );
+}
+
 export interface VaultScreenProps {
   vaultRef: VaultRef;
   /** 選択中のノートパス（ツリー画面では null） */
@@ -449,7 +476,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           aria-pressed={leftSidebarOpen}
           onClick={() => setLeftSidebarOpen((open) => !open)}
         >
-          ▣
+          <WorkspaceIcon name="files" />
         </button>
         <button
           type="button"
@@ -457,19 +484,19 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           aria-label="検索"
           onClick={() => setSearchOpen(true)}
         >
-          ⌕
+          <WorkspaceIcon name="search" />
         </button>
         <button type="button" className="workspace-rail-button" aria-label="ブックマーク">
-          ♡
+          <WorkspaceIcon name="bookmark" />
         </button>
         <button type="button" className="workspace-rail-button" aria-label="データベース">
-          ▦
+          <WorkspaceIcon name="database" />
         </button>
         <button type="button" className="workspace-rail-button" aria-label="カレンダー">
-          ▣
+          <WorkspaceIcon name="calendar" />
         </button>
         <button type="button" className="workspace-rail-button" aria-label="コマンド">
-          &gt;_
+          <WorkspaceIcon name="command" />
         </button>
         <span className="workspace-rail-spacer" />
         <button
@@ -479,7 +506,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           aria-pressed={rightSidebarOpen}
           onClick={() => setRightSidebarOpen((open) => !open)}
         >
-          ⚙
+          <WorkspaceIcon name="sidebar" />
         </button>
       </nav>
       {leftSidebarOpen && (
