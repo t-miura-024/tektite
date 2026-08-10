@@ -2089,6 +2089,7 @@ body {
 
 .vault-workspace-shell .vault-sidebar {
   position: relative;
+  padding-top: 0;
   padding-inline: 12px;
 }
 
@@ -2098,7 +2099,10 @@ body {
   gap: 4px;
   height: 40px;
   margin-inline: -12px;
+  margin-bottom: 8px;
   padding-inline: 12px;
+  width: calc(100% + 24px);
+  box-sizing: border-box;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-accent);
   font-size: 16px;
@@ -2161,6 +2165,10 @@ body {
   white-space: nowrap;
 }
 
+.vault-workspace-shell .file-tree {
+  padding-top: 4px;
+}
+
 .vault-workspace-shell .file-tree-toolbar {
   display: flex;
   gap: 4px;
@@ -2190,6 +2198,7 @@ body {
 .vault-workspace-shell .file-tree-toolbar {
   gap: 2px;
   flex-wrap: nowrap;
+  margin-left: -4px;
 }
 
 .vault-workspace-shell .file-tree-toolbar .button-secondary {
