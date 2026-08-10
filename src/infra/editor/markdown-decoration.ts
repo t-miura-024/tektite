@@ -46,6 +46,16 @@ export class TaskCheckboxWidget extends WidgetType {
   }
 }
 
+export class HtmlBreakWidget extends WidgetType {
+  override toDOM(): HTMLElement {
+    return document.createElement('br');
+  }
+
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
 /** 解析結果 1 件を対応する Decoration に変換する */
 function toDecoration(d: MarkdownDecoration): Decoration {
   switch (d.type) {
@@ -104,6 +114,7 @@ export function computeDecorationSet(doc: Text): DecorationSet {
     })),
     ...htmlCommentRanges(text),
     ...frontmatterRanges(text),
+    ...htmlBreakRanges(text),
   ].toSorted((a, b) => a.from - b.from || Number(a.line) * -1 - Number(b.line) * -1);
   for (const range of ranges) {
     // LineDecoration はゼロ長で追加する（CM6 の制約: 行全体への適用は from の行で決まる）
@@ -114,6 +125,28 @@ export function computeDecorationSet(doc: Text): DecorationSet {
     }
   }
   return builder.finish();
+}
+
+function htmlBreakRanges(text: string): Array<{
+  from: number;
+  to: number;
+  line: false;
+  value: Decoration;
+}> {
+  const ranges: Array<{ from: number; to: number; line: false; value: Decoration }> = [];
+  for (const match of text.matchAll(/<br\s*\/?>/gi)) {
+    const from = match.index;
+    if (from === undefined) {
+      continue;
+    }
+    ranges.push({
+      from,
+      to: from + match[0].length,
+      line: false,
+      value: Decoration.replace({ widget: new HtmlBreakWidget() }),
+    });
+  }
+  return ranges;
 }
 
 function frontmatterRanges(text: string): Array<{

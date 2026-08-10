@@ -1,13 +1,17 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 
-import { computeDecorationSet, TaskCheckboxWidget } from '@/infra/editor/markdown-decoration';
+import {
+  computeDecorationSet,
+  HtmlBreakWidget,
+  TaskCheckboxWidget,
+} from '@/infra/editor/markdown-decoration';
 
 interface Found {
   readonly from: number;
   readonly to: number;
   readonly className?: string;
-  readonly widget?: TaskCheckboxWidget;
+  readonly widget?: TaskCheckboxWidget | HtmlBreakWidget;
 }
 
 /** ドキュメントの装飾セットをクラス名と位置のリストに変換する */
@@ -16,7 +20,10 @@ function collect(docText: string): Found[] {
   const decos = computeDecorationSet(doc);
   const found: Found[] = [];
   decos.between(0, doc.length, (from, to, value) => {
-    const spec = value.spec as { class?: string; widget?: TaskCheckboxWidget };
+    const spec = value.spec as {
+      class?: string;
+      widget?: TaskCheckboxWidget | HtmlBreakWidget;
+    };
     found.push({ from, to, className: spec.class, widget: spec.widget });
   });
   return found;
@@ -64,7 +71,7 @@ describe('CM6 ライブプレビュー装飾（decoration 変換）', () => {
   it('未完了タスクは checked: false の widget になる', () => {
     const found = collect('- [ ] 未完了');
     const checkbox = found.find((f) => f.widget instanceof TaskCheckboxWidget);
-    expect(checkbox?.widget?.checked).toBe(false);
+    expect(checkbox?.widget instanceof TaskCheckboxWidget && checkbox.widget.checked).toBe(false);
   });
 
   it('水平線を mark decoration に変換する', () => {
@@ -84,5 +91,14 @@ describe('CM6 ライブプレビュー装飾（decoration 変換）', () => {
     expect(found).toContainEqual({ from: 0, to: 0, className: 'tk-frontmatter-delimiter' });
     expect(found).toContainEqual({ from: 4, to: 4, className: 'tk-frontmatter-field' });
     expect(found).toContainEqual({ from: 15, to: 15, className: 'tk-frontmatter-delimiter' });
+  });
+
+  it('HTMLのbr要素を改行Widgetへ置換する', () => {
+    const found = collect('前<br>後');
+    expect(found).toContainEqual({
+      from: 1,
+      to: 5,
+      widget: new HtmlBreakWidget(),
+    });
   });
 });
