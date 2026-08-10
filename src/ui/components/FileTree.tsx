@@ -40,7 +40,8 @@ export interface FileTreeProps {
   onOpenSearch?: () => void;
   onOpenQuickSwitcher?: () => void;
   onRevealCurrent?: () => void;
-  onExpandAll?: () => void;
+  onToggleAll?: () => void;
+  allExpanded?: boolean;
   /** リネーム（newName は 1 セグメントの新しい名前）をコミットする */
   onRename: (path: string, type: 'file' | 'directory', newName: string) => void;
   /** 移動（targetDirectory は '' でルート）をコミットする */
@@ -100,6 +101,32 @@ function blockedMoveTargets(
   return blocked;
 }
 
+type ActionIconName =
+  | 'file-plus'
+  | 'folder-plus'
+  | 'search'
+  | 'switcher'
+  | 'locate'
+  | 'expand'
+  | 'collapse';
+
+function ActionIcon({ name }: { name: ActionIconName }) {
+  const paths: Record<ActionIconName, string> = {
+    'file-plus': 'M4 2.5h7l3 3v10H4z M11 2.5v3h3 M8.5 9v4 M6.5 11h4',
+    'folder-plus': 'M2.5 5.5h5l1.5 1.5h8v8.5h-14.5z M9.5 9v4 M7.5 11h4',
+    search: 'm14 14 3.5 3.5 M15 9.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0Z',
+    switcher: 'M4 5h12 M4 9h8 M4 13h10 M14 11l2 2-2 2',
+    locate: 'M9.5 3v3 M9.5 13v3 M3 9.5h3 M13 9.5h3 M12.5 9.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+    expand: 'M4 7V4h3 M13 4h3v3 M16 13v3h-3 M7 16H4v-3',
+    collapse: 'M7 4H4v3 M13 4h3v3 M4 13v3h3 M16 13v3h-3',
+  };
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d={paths[name]} />
+    </svg>
+  );
+}
+
 export function FileTree({
   root,
   vaultRef,
@@ -111,7 +138,8 @@ export function FileTree({
   onOpenSearch,
   onOpenQuickSwitcher,
   onRevealCurrent,
-  onExpandAll,
+  onToggleAll,
+  allExpanded = false,
   onRename,
   onMove,
   onDelete,
@@ -262,7 +290,7 @@ export function FileTree({
           title="新規ノート"
           onClick={() => openCreate('note')}
         >
-          ＋ 新規ノート
+          <ActionIcon name="file-plus" />
         </button>
         <button
           type="button"
@@ -272,7 +300,7 @@ export function FileTree({
           title="新規フォルダー"
           onClick={() => openCreate('directory')}
         >
-          ＋ 新規フォルダー
+          <ActionIcon name="folder-plus" />
         </button>
         <button
           type="button"
@@ -281,7 +309,7 @@ export function FileTree({
           title="検索 ⌘K"
           onClick={() => onOpenSearch?.()}
         >
-          検索
+          <ActionIcon name="search" />
         </button>
         <button
           type="button"
@@ -290,7 +318,7 @@ export function FileTree({
           title="移動 ⌘O"
           onClick={() => onOpenQuickSwitcher?.()}
         >
-          移動
+          <ActionIcon name="switcher" />
         </button>
         <button
           type="button"
@@ -300,16 +328,17 @@ export function FileTree({
           disabled={selectedPath === null}
           onClick={() => onRevealCurrent?.()}
         >
-          ◎
+          <ActionIcon name="locate" />
         </button>
         <button
           type="button"
           className="button-secondary file-tree-action-button"
-          aria-label="すべて展開"
-          title="すべて展開"
-          onClick={() => onExpandAll?.()}
+          aria-label={allExpanded ? 'すべて折りたたむ' : 'すべて展開'}
+          title={allExpanded ? 'すべて折りたたむ' : 'すべて展開'}
+          aria-pressed={allExpanded}
+          onClick={() => onToggleAll?.()}
         >
-          ⌄
+          <ActionIcon name={allExpanded ? 'collapse' : 'expand'} />
         </button>
       </div>
       {creating !== null && (

@@ -2167,3 +2167,18 @@ body {
 .vault-workspace-shell .file-tree-toolbar button:disabled {
   opacity: 0.35;
 }
+
+.vault-workspace-shell .file-tree-toolbar button::before {
+  content: none !important;
+}
+
+.vault-workspace-shell .file-tree-toolbar button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}

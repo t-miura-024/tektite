@@ -368,11 +368,15 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     });
   }, [notePath]);
 
-  const expandAllDirectories = useCallback((): void => {
-    if (state.kind === 'ready') {
-      setExpandedPaths(new Set(collectDirectoryPaths(state.tree.root)));
-    }
-  }, [state]);
+  const allDirectoryPaths = useMemo(
+    () => (state.kind === 'ready' ? collectDirectoryPaths(state.tree.root) : []),
+    [state],
+  );
+  const allExpanded =
+    allDirectoryPaths.length > 0 && allDirectoryPaths.every((path) => expandedPaths.has(path));
+  const toggleAllDirectories = useCallback((): void => {
+    setExpandedPaths(allExpanded ? new Set(['']) : new Set(allDirectoryPaths));
+  }, [allDirectoryPaths, allExpanded]);
 
   // ツリーが取得できている間だけ全ファイルパスを算出する（リーディング表示と
   // ファイル操作のリンク張り替え入力に使う）
@@ -521,7 +525,8 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
                 onOpenSearch={() => setSearchOpen(true)}
                 onOpenQuickSwitcher={() => setQuickSwitchOpen(true)}
                 onRevealCurrent={revealCurrentNote}
-                onExpandAll={expandAllDirectories}
+                onToggleAll={toggleAllDirectories}
+                allExpanded={allExpanded}
                 onCreateNote={(noteName) =>
                   void runFileOperation(
                     { kind: 'create-note', path: noteName },
