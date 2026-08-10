@@ -512,7 +512,15 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       {leftSidebarOpen && (
         <aside className="vault-sidebar">
           <div className="sidebar-workspace-tab" aria-label="ファイルエクスプローラ">
-            <span aria-hidden="true">▣</span>
+            <button type="button" aria-label="ファイル" aria-pressed="true">
+              <WorkspaceIcon name="files" />
+            </button>
+            <button type="button" aria-label="検索" onClick={() => setSearchOpen(true)}>
+              <WorkspaceIcon name="search" />
+            </button>
+            <button type="button" aria-label="ブックマーク">
+              <WorkspaceIcon name="bookmark" />
+            </button>
           </div>
           <div className="vault-sidebar-header">
             <Link to="/" className="vault-back-link">

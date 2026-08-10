@@ -2095,12 +2095,42 @@ body {
 .vault-workspace-shell .sidebar-workspace-tab {
   display: flex;
   align-items: center;
+  gap: 4px;
   height: 40px;
   margin-inline: -12px;
   padding-inline: 12px;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-accent);
   font-size: 16px;
+}
+
+.vault-workspace-shell .sidebar-workspace-tab button {
+  display: grid;
+  width: 30px;
+  height: 26px;
+  place-items: center;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+}
+
+.vault-workspace-shell .sidebar-workspace-tab button[aria-pressed='true'],
+.vault-workspace-shell .sidebar-workspace-tab button:hover {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-fg);
+}
+
+.vault-workspace-shell .sidebar-workspace-tab svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
 }
 
 .vault-workspace-shell .vault-sidebar-header,
