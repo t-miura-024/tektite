@@ -175,7 +175,7 @@ export const markdownDecoration = StateField.define<DecorationSet>({
 
 /** 装飾クラスのスタイル。アプリの CSS 変数に追従しダークモードでも整合する */
 export const markdownDecorationTheme = EditorView.baseTheme({
-  '.tk-html-comment': { color: '#6f80b5' },
+  '.tk-html-comment': { color: '#6272a4' },
   '.tk-heading-marker': { color: 'var(--color-fg-muted)' },
   '.tk-heading': { fontWeight: '700', color: 'var(--color-fg)' },
   '.tk-heading-1': { fontSize: '1.6em', lineHeight: 1.25 },

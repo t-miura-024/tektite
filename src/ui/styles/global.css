@@ -1841,7 +1841,7 @@ body {
 .reading-inline-title {
   margin: 8px 0 16px;
   padding-top: 16px;
-  color: #ff5b5b;
+  color: #ff5555;
   font-size: 32px;
   font-weight: 700;
   line-height: 38.4px;
@@ -1862,7 +1862,7 @@ body {
   margin: 1.35rem 0 1rem;
   padding-bottom: 0.65rem;
   border-bottom: 1px solid color-mix(in srgb, var(--color-fg-muted) 25%, transparent);
-  color: #ff5b5b;
+  color: #ff5555;
   font-weight: 700;
 }
 
@@ -1899,22 +1899,28 @@ body {
 }
 
 .note-editor .tk-heading {
-  color: #ff5b5b;
+  color: #ff5555;
 }
 
 .note-editor .cm-line:has(.tk-heading) {
-  padding-block: 0.65rem;
+  margin-block-start: 0;
+  padding: 14px 0 12.8px;
   border-bottom: 1px solid color-mix(in srgb, var(--color-fg-muted) 25%, transparent);
 }
 
 .note-editor .cm-line:has(.tk-heading-1) {
-  margin-block-start: 0.8rem;
+  margin-block-start: 0;
+}
+
+.note-editor .tk-heading-1 {
+  font-size: 32px;
+  line-height: 38.4px;
 }
 
 .editor-inline-title {
   margin: 8px 48px 16px;
   padding-top: 16px;
-  color: #ff5b5b;
+  color: #ff5555;
   font-size: 32px;
   font-weight: 700;
   line-height: 38.4px;
