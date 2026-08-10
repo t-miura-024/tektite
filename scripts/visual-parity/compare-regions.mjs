@@ -3,6 +3,7 @@ import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 
 const [expectedPath, actualPath] = process.argv.slice(2);
+const threshold = Number(process.env.PIXELMATCH_THRESHOLD ?? '0.1');
 const regions = [
   ['rail', 0, 0, 44, 1027],
   ['sidebar', 44, 0, 244, 1027],
@@ -29,12 +30,27 @@ const results = regions.map(([name, x, y, right, bottom]) => {
   for (let row = 0; row < height; row += 1) {
     const sourceOffset = ((y + row) * expected.width + x) * 4;
     const targetOffset = row * width * 4;
-    expectedRegion.set(expected.data.subarray(sourceOffset, sourceOffset + width * 4), targetOffset);
+    expectedRegion.set(
+      expected.data.subarray(sourceOffset, sourceOffset + width * 4),
+      targetOffset,
+    );
     actualRegion.set(actual.data.subarray(sourceOffset, sourceOffset + width * 4), targetOffset);
   }
-  const diff = pixelmatch(expectedRegion, actualRegion, null, width, height, { threshold: 0.1 });
+  const diff = pixelmatch(expectedRegion, actualRegion, null, width, height, { threshold });
   const total = width * height;
-  return { name, x, y, width, height, diffPixels: diff, diffRatio: diff / total, similarity: 1 - diff / total };
+  return {
+    name,
+    x,
+    y,
+    width,
+    height,
+    diffPixels: diff,
+    diffRatio: diff / total,
+    similarity: 1 - diff / total,
+    threshold,
+  };
 });
 
-process.stdout.write(`${JSON.stringify({ expected: expectedPath, actual: actualPath, regions: results })}\n`);
+process.stdout.write(
+  `${JSON.stringify({ expected: expectedPath, actual: actualPath, regions: results })}\n`,
+);

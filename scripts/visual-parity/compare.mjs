@@ -3,6 +3,7 @@ import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 
 const [expectedPath, actualPath, diffPath] = process.argv.slice(2);
+const threshold = Number(process.env.PIXELMATCH_THRESHOLD ?? '0.1');
 
 if (!expectedPath || !actualPath || !diffPath) {
   throw new Error('Usage: compare.mjs <expected.png> <actual.png> <diff.png>');
@@ -24,7 +25,7 @@ const diffPixels = pixelmatch(
   diff.data,
   expected.width,
   expected.height,
-  { threshold: 0.1 },
+  { threshold },
 );
 const totalPixels = expected.width * expected.height;
 const ratio = diffPixels / totalPixels;
@@ -41,5 +42,6 @@ process.stdout.write(
     totalPixels,
     diffRatio: ratio,
     similarity: 1 - ratio,
+    threshold,
   })}\n`,
 );
