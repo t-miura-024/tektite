@@ -16,6 +16,16 @@ interface Env {
   OAUTH_REDIRECT_URI?: string;
 
   /**
+   * PAT モード有効化フラグ（vars。ローカル開発専用）。
+   * この値が "true" かつ GITHUB_PERSONAL_TOKEN が設定されている時のみ PAT モードが有効になり、
+   * OAuth 4 変数（GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / SESSION_SECRET / OAUTH_REDIRECT_URI）を
+   * 一切必要としない（PAT 優先: セッション Cookie は無視される）。
+   */
+  TEKTITE_PAT_AUTH?: string;
+  /** PAT モードで GitHub API を呼び出すための個人アクセストークン（secret。ローカル開発専用） */
+  GITHUB_PERSONAL_TOKEN?: string;
+
+  /**
    * テストシーム: サーバー側トークン交換のエンドポイント。
    * 既定は GitHub 本番。E2E ではローカルモックに差し替える
    * （ブラウザが訪れる認可ページは常に github.com を使い、Playwright route でモックする）。

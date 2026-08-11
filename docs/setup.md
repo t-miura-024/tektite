@@ -180,6 +180,39 @@ pnpm exec wrangler pages dev dist
 
 `.dev.vars` の `OAUTH_REDIRECT_URI` は `http://localhost:4173/api/auth/callback` を使う。この URL を OAuth App の callback として登録すればローカルでも実ログインを検証できる（GitHub OAuth App は localhost の callback も登録可能）。
 
+### PAT モード（OAuth App なしで実 GitHub を操作する）
+
+OAuth App の作成・登録をせずに実 GitHub で動作確認したい場合は、**PAT モード**（ローカル開発専用）を使う。`TEKTITE_PAT_AUTH=true`（完全一致）かつ `GITHUB_PERSONAL_TOKEN` が空でない時のみ有効で、有効中はセッション Cookie を一切読まず PAT が常に使われる（PAT 優先）。OAuth の 4 変数（`GITHUB_CLIENT_ID` など）は未設定のままでよい。
+
+**PAT のスコープ要件:**
+
+- classic PAT: `repo` スコープを付与する（Vault 候補は push 権限のあるリポジトリのみ表示され、保存は Git のコミットを伴うため）
+- fine-grained PAT: Repository access で Vault にしたいリポジトリを選択し、**Contents: Read and write** と **Metadata: Read** を付与する
+
+**手順:**
+
+1. `.dev.vars` に以下を追記する（`<PAT>` は GitHub で発行した個人アクセストークン）:
+
+   ```sh
+   TEKTITE_PAT_AUTH=true
+   GITHUB_PERSONAL_TOKEN=<PAT>
+   ```
+
+2. 起動する:
+
+   ```sh
+   pnpm build
+   pnpm exec wrangler pages dev dist
+   ```
+
+**手動スモークテスト（完了条件 1 の確認手順）:**
+
+1. ブラウザで http://localhost:4173 を開く。OAuth 未設定（セッション Cookie がなく、OAuth 4 変数も未設定）でもログイン済みとして **Vault 選択**画面が表示されることを確認する
+2. Vault として使うリポジトリを選択し、ノート一覧・閲覧（本文の読み込み）ができることを確認する
+3. ノートを編集して保存（Cmd+S）し、実 GitHub リポジトリへ変更（コミット）が反映されることを GitHub 上で確認する
+
+保存は Git のコミットを伴うため、スモークテストには**専用のテストリポジトリ**を使うのが安全。
+
 E2E（`pnpm test:e2e`）は資格情報不要: OAuth の各エンドポイントはモック（`features/support/mock-github-server.mjs` + Playwright route）に差し替えられる。初回実行時のみ Playwright のブラウザをインストールする:
 
 ```sh
