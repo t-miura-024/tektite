@@ -79,3 +79,9 @@ _Avoid_: grep, find
 **リンク張り替え**:
 Note のリネーム/移動に伴い、その Note を参照する全 WikiLink を一括で更新する処理。
 _Avoid_: refactoring, redirect
+
+### 認証と環境
+
+**PAT モード**:
+GitHub OAuth を介さず、ローカル環境変数に設定した個人アクセストークンで認証する開発専用の動作モード。`TEKTITE_PAT_AUTH=true` と `GITHUB_PERSONAL_TOKEN` の両方が設定された時のみ有効で、有効中はセッション Cookie より優先してトークンが使われる。
+_Avoid_: token auth, personal token login

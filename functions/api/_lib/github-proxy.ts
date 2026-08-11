@@ -3,6 +3,9 @@
  *
  * - 認証: M2 の暗号化 Cookie（functions/api/auth/_lib/session）を再利用し、
  *   リクエストからアクセストークンを復号する。トークンは Workers 側のみ保持。
+ * - PAT モード: `TEKTITE_PAT_AUTH === 'true'` かつ `GITHUB_PERSONAL_TOKEN` が
+ *   設定されたローカル専用フォールバック。有効時はセッション Cookie を一切
+ *   読まず（PAT 優先）、OAuth 4 変数を必要としない。
  * - GitHub API 呼び出し: ヘッダー規約を統一した fetch ヘルパーを使う。
  * - エラー envelope: GitHub の失敗応答を UI が扱いやすい形に変換する
  *   （401 → unauthenticated / 403・429 → rate_limited / 404 → not_found / その他 → 502）。
@@ -22,31 +25,58 @@ export class ProxyConfigError extends Error {
   }
 }
 
+/**
+ * PAT モードが有効かどうか。
+ * `TEKTITE_PAT_AUTH === 'true'` かつ `GITHUB_PERSONAL_TOKEN` が空でない時のみ true。
+ * それ以外の値のバリエーションは判定しない（完全一致のみ）。
+ */
+export function isPatModeEnabled(env: Env): boolean {
+  return env.TEKTITE_PAT_AUTH === 'true' && !!env.GITHUB_PERSONAL_TOKEN;
+}
+
 export interface ProxyConfig {
-  sessionSecret: string;
+  /** セッション Cookie 復号用の鍵。PAT モードでは null（不要） */
+  sessionSecret: string | null;
+  /** PAT モード時のトークン。OAuth モードでは null */
+  patToken: string | null;
   /** サーバー側 GitHub API ベース URL（E2E でモック差し替え可能） */
   apiBaseUrl: string;
 }
 
 /** プロキシ系エンドポイントに必要な設定だけを検証する（OAuth 資格情報は不要） */
 export function resolveProxyConfig(env: Env): ProxyConfig {
+  if (isPatModeEnabled(env)) {
+    // PAT モードでは SESSION_SECRET を必要としない
+    return {
+      sessionSecret: null,
+      patToken: env.GITHUB_PERSONAL_TOKEN ?? null,
+      apiBaseUrl: env.GITHUB_API_BASE_URL ?? DEFAULT_GITHUB_API_BASE_URL,
+    };
+  }
   if (!env.SESSION_SECRET) {
     throw new ProxyConfigError('環境変数 SESSION_SECRET が設定されていません');
   }
   return {
     sessionSecret: env.SESSION_SECRET,
+    patToken: null,
     apiBaseUrl: env.GITHUB_API_BASE_URL ?? DEFAULT_GITHUB_API_BASE_URL,
   };
 }
 
 export type ProxyAuthResult = { ok: true; token: string } | { ok: false; response: Response };
 
-/** セッション Cookie を復号し、未ログインなら 401 応答を返す */
+/**
+ * 認証を解決する。PAT モードでは Cookie を一切読まず常に PAT を使う（PAT 優先）。
+ * OAuth モードではセッション Cookie を復号し、未ログインなら 401 応答を返す。
+ */
 export async function authenticateRequest(
   request: Request,
   config: ProxyConfig,
 ): Promise<ProxyAuthResult> {
-  const token = await readAccessToken(request, config.sessionSecret);
+  if (config.patToken) {
+    return { ok: true, token: config.patToken };
+  }
+  const token = await readAccessToken(request, config.sessionSecret ?? '');
   if (!token) {
     return { ok: false, response: Response.json({ error: 'unauthenticated' }, { status: 401 }) };
   }

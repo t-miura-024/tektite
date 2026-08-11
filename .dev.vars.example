@@ -10,3 +10,11 @@ GITHUB_CLIENT_SECRET=
 SESSION_SECRET=
 # OAuth コールバック URL（ローカル開発では下記。デプロイ先では https://<domain>/api/auth/callback）
 OAUTH_REDIRECT_URI=http://localhost:4173/api/auth/callback
+
+# ローカル専用 PAT モード（docs/setup.md「7. ローカル開発」参照）。
+# TEKTITE_PAT_AUTH=true（完全一致）かつ GITHUB_PERSONAL_TOKEN が空でない時のみ有効。
+# 有効中は OAuth のセッション Cookie を一切読まず PAT が使われる（PAT 優先）。
+# PAT モード有効化フラグ
+TEKTITE_PAT_AUTH=
+# GitHub 個人アクセストークン（scope: repo、または fine-grained で Contents 読み書き + Metadata）
+GITHUB_PERSONAL_TOKEN=
