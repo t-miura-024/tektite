@@ -168,17 +168,19 @@ curl -s -o /dev/null -w "%{http_code} -> %{redirect_url}\n" https://tektite.page
 cp .dev.vars.example .dev.vars
 # .dev.vars にローカル開発用の値を書く（gitignore 済み）
 pnpm install
-pnpm dev          # アセットのみの開発サーバー（Functions は動かない）
+pnpm dev          # フロント（Vite）と Pages Functions を同時起動
 ```
 
-Pages Functions を含めてローカルで動かす場合:
+`pnpm dev` は Vite 開発サーバー（http://localhost:5173）と `wrangler pages dev`（ポート 8788）を並行起動する。`/api/*` は Vite の proxy で 8788 へ転送されるため、ブラウザからは 5173 だけで完結する。`dist/` は predev で空の状態に保証される（ビルド済みアセットは不要）。
+
+`wrangler pages dev` 単体で起動する場合（E2E と同じ 4173 を使いたい場合など）:
 
 ```sh
 pnpm build
 pnpm exec wrangler pages dev dist
 ```
 
-`.dev.vars` の `OAUTH_REDIRECT_URI` は `http://localhost:4173/api/auth/callback` を使う。この URL を OAuth App の callback として登録すればローカルでも実ログインを検証できる（GitHub OAuth App は localhost の callback も登録可能）。
+OAuth モードで実ログインを検証する場合、`.dev.vars` の `OAUTH_REDIRECT_URI` は `http://localhost:5173/api/auth/callback` を使い、この URL を OAuth App の callback として登録する（GitHub OAuth App は localhost の callback も登録可能）。PAT モードでは不要。
 
 ### PAT モード（OAuth App なしで実 GitHub を操作する）
 
@@ -201,9 +203,10 @@ OAuth App の作成・登録をせずに実 GitHub で動作確認したい場�
 2. 起動する:
 
    ```sh
-   pnpm build
-   pnpm exec wrangler pages dev dist
+   pnpm dev
    ```
+
+   PAT モードは `TEKTITE_PAT_AUTH=true`（完全一致）かつ `GITHUB_PERSONAL_TOKEN` が空でない時のみ有効。有効中はセッション Cookie を一切読まず PAT が常に使われる（PAT 優先）。
 
 **手動スモークテスト（完了条件 1 の確認手順）:**
 

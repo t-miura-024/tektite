@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "predev": "mkdir -p dist",
+    "dev": "concurrently -k -n web,api -c auto \"vite\" \"pnpm exec wrangler pages dev dist --port 8788\"",
     "build": "pnpm typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p functions/tsconfig.json",
@@ -42,6 +43,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
+    "concurrently": "^10.0.4",
     "jsdom": "^30.0.1",
     "lefthook": "^2.1.10",
     "oxfmt": "^0.62.0",
