@@ -8,8 +8,10 @@ GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 # AES-GCM 暗号化 Cookie の鍵（十分な長さの乱数。例: openssl rand -hex 32）
 SESSION_SECRET=
-# OAuth コールバック URL（ローカル開発では下記。デプロイ先では https://<domain>/api/auth/callback）
-OAUTH_REDIRECT_URI=http://localhost:4173/api/auth/callback
+# OAuth コールバック URL。pnpm dev（Vite 経由）なら http://localhost:5173/api/auth/callback、
+# wrangler pages dev 単体（E2E 相当）なら http://localhost:4173/api/auth/callback。
+# デプロイ先では https://<domain>/api/auth/callback。
+OAUTH_REDIRECT_URI=http://localhost:5173/api/auth/callback
 
 # ローカル専用 PAT モード（docs/setup.md「7. ローカル開発」参照）。
 # TEKTITE_PAT_AUTH=true（完全一致）かつ GITHUB_PERSONAL_TOKEN が空でない時のみ有効。

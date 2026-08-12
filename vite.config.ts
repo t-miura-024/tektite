@@ -11,6 +11,11 @@ export default defineConfig({
       '@functions': path.resolve(import.meta.dirname, 'functions'),
     },
   },
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8788',
+    },
+  },
   build: {
     outDir: 'dist',
     sourcemap: true,

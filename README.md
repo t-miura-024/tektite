@@ -14,7 +14,7 @@ Web で完結する Obsidian ライク・マークダウンエディタ。GitHub
 
 ```sh
 pnpm install        # 依存インストール
-pnpm dev            # 開発サーバー
+pnpm dev            # 開発サーバー（Vite + Pages Functions を同時起動）
 pnpm build          # typecheck + プロダクションビルド
 pnpm test           # Vitest ユニットテスト
 pnpm test:e2e       # playwright-bdd（要: pnpm build と playwright install chromium）
