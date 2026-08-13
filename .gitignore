@@ -6,6 +6,7 @@ dist/
 
 # cloudflare / wrangler
 .wrangler/
+.wrangler.deploy.jsonc
 
 # session scratch (mt-grill-rounds etc.)
 tmp/
