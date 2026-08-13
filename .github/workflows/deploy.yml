@@ -1,4 +1,4 @@
-name: Deploy (Cloudflare Pages)
+name: Deploy (Cloudflare Workers)
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to Cloudflare Pages
+    name: Deploy to Cloudflare Workers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,9 +32,29 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Deploy (wrangler pages deploy)
+      - name: Ensure R2 bucket (idempotent)
+        if: steps.cf-check.outputs.skip != 'true'
+        run: pnpm exec wrangler r2 bucket create tektite-vaults || true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Ensure KV namespace (idempotent)
+        if: steps.cf-check.outputs.skip != 'true'
+        id: kv
+        run: |
+          ID=$(pnpm exec wrangler kv namespace list | jq -r '.[] | select(.title == "tektite-tokens") | .id' | head -n 1)
+          if [ -z "$ID" ]; then
+            ID=$(pnpm exec wrangler kv namespace create tektite-tokens | jq -r '.id')
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Deploy (wrangler deploy)
         if: steps.cf-check.outputs.skip != 'true'
         run: pnpm deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # wrangler.jsonc の KV namespace id 補間（${TEKTITE_KV_NAMESPACE_ID}）に使う
+          TEKTITE_KV_NAMESPACE_ID: ${{ steps.kv.outputs.id }}

@@ -116,6 +116,12 @@ export function createNoteIndexRegistry(): NoteIndexRegistry {
             notes.set(change.to, { path: change.to, sha: '', content: source.content });
           }
           notes.delete(change.path);
+        } else if (change.op === 'copy') {
+          const source = notes.get(change.path);
+          if (source !== undefined) {
+            // 複製は元の本文をそのまま引き継ぐ（WikiLink は張り替えない）
+            notes.set(change.to, { path: change.to, sha: '', content: source.content });
+          }
         } else if (change.op === 'create-binary') {
           // 添付（画像）はノート索引の対象外（検索・クイックスイッチャーに混ぜない）
           notes.delete(change.path);

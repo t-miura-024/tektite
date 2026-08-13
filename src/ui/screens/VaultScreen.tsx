@@ -25,7 +25,8 @@ import { applySavedNote, loadNoteIndex } from '@/application/note-index';
 import type { NoteIndex } from '@/application/note-index';
 import { createNoteSearcher } from '@/application/search';
 import type { NoteSearcher, SearchableNote } from '@/application/search';
-import { openVault } from '@/application/vault';
+import { initializeVault, openVault, fetchVaultSyncStatus, syncVault } from '@/application/vault';
+import type { VaultSyncConflict, VaultSyncStatus } from '@/application/vault';
 import { run, slugify } from '@/composition';
 import { buildNotationIndex } from '@/domain/notation/index';
 import type { VaultNotationIndex } from '@/domain/notation/index';
@@ -87,8 +88,29 @@ const DEFAULT_SIDEBAR_WIDTH = 200;
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_WIDTH = 420;
 
+/** ファイル操作の成功トースト文言（操作種別ごと。モジュール定数） */
+const FILE_OPERATION_MESSAGES: Record<FileOperation['kind'], string> = {
+  'create-note': 'ノートを作成しました。',
+  'create-directory': 'フォルダーを作成しました。',
+  'delete-note': 'ノートを削除しました。',
+  'delete-directory': 'フォルダーを削除しました。',
+  'rename-note': 'リネームしました。',
+  'rename-directory': 'リネームしました。',
+  'duplicate-note': 'ノートを複製しました。',
+  'duplicate-directory': 'フォルダーを複製しました。',
+};
+
 function clampSidebarWidth(width: number): number {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+}
+
+/** 同期時刻の表示（ローカル時刻の時:分。パース不能な場合はそのまま返す） */
+function formatSyncTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
 }
 
 function readSidebarWidth(): number {
@@ -162,6 +184,13 @@ type TreeState =
 
 export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: VaultScreenProps) {
   const [state, setState] = useState<TreeState>({ kind: 'loading' });
+  /**
+   * 初期同期の実行中フラグ（M3）。Vault を開くたびに初期同期 API を呼び、
+   * R2 に同期済みメタがある場合はサーバーが即座に完了を返す（初回のみ
+   * GitHub API を消費）。同期中はツリーの代わりに進捗メッセージを表示し、
+   * 完了後に Vault を開く（完了条件 2 の進捗画面）。
+   */
+  const [initializing, setInitializing] = useState(false);
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set(['']));
   /**
    * 共有メモリ索引（Vault の全ノート本文 + sha）。ツリー取得成功後に application 層の
@@ -187,6 +216,36 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   const [outlineContent, setOutlineContent] = useState('');
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   const [resizingSidebar, setResizingSidebar] = useState(false);
+  /**
+   * 未確定（未コミット）の新規ノートパス（Obsidian 式の新規作成）。
+   * ツールバーやコンテキストメニューの「新規ノート」でデフォルト名
+   * （Untitled.md など）を決めてエディタを開き、タイトル確定（Enter / blur）
+   * か自動保存（blur）で最終名のコミットが 1 回だけ行われる（Q15:2）。
+   * Escape で破棄（Q19）。null は未確定ノートなし。
+   */
+  const [pendingNotePath, setPendingNotePath] = useState<string | null>(null);
+  /**
+   * 明示同期の実行中フラグ（M5）。ヘッダーの同期ボタンから実行する。
+   */
+  const [syncing, setSyncing] = useState(false);
+  /**
+   * 同期状態（最終同期時刻・失敗マーク。完了条件 10）。
+   * Vault オープン時に GET /sync で取得し、定時同期の失敗（lastSyncError）を
+   * 表示する。明示同期の成功後は取得し直して最新化する。
+   */
+  const [syncStatus, setSyncStatus] = useState<VaultSyncStatus | null>(null);
+  /**
+   * 明示同期で検出された未解決の同期衝突（M5。完了条件 6）。
+   * 開いているノートが衝突パスに含まれる場合、NotePane に渡して
+   * 差分表示 + 上書き/取り込みで解決する。
+   */
+  const [syncConflicts, setSyncConflicts] = useState<readonly VaultSyncConflict[]>([]);
+  /**
+   * 同期完了ごとに増えるバージョン（NotePane への最新化通知。完了条件 9）。
+   * 未編集で開いているノートは同期後に再読み込みされ、編集中のノートは
+   * エディタの内容が保持される。
+   */
+  const [syncVersion, setSyncVersion] = useState(0);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
@@ -194,6 +253,22 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
 
   const load = useCallback(async (): Promise<void> => {
     setState({ kind: 'loading' });
+    // 初期同期: 初回のみ GitHub から R2 へ全量を取り込み、以降は R2 読み取りに
+    // なる（サーバーは同期済みなら GitHub を消費せず即完了を返す）。失敗しても
+    // ツリー取得へ進む（R2 未設定環境のフォールバック。実エラーはトースト通知）
+    setInitializing(true);
+    try {
+      await run(initializeVault({ owner, name }));
+    } catch (error) {
+      if (isSessionExpiredError(error)) {
+        setInitializing(false);
+        notify('セッションの有効期限が切れました。ログインし直してください。');
+        onSessionExpired();
+        return;
+      }
+      notify(vaultErrorMessage(error));
+    }
+    setInitializing(false);
     try {
       const tree = await run(openVault({ owner, name }));
       setState({ kind: 'ready', tree });
@@ -230,6 +305,73 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Vault オープン時に同期状態（最終同期時刻・失敗マーク）を取得する。
+  // 定時同期の失敗が meta に記録されているため、次回オープン時に表示される
+  // （完了条件 10）。取得失敗は表示を諦めるだけ（同期ボタン自体は使える）
+  useEffect(() => {
+    let cancelled = false;
+    void run(fetchVaultSyncStatus({ owner, name }))
+      .then((status) => {
+        if (!cancelled) {
+          setSyncStatus(status);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, name]);
+
+  /**
+   * 明示同期（M5。完了条件 5 / 6 / 9）。
+   * ヘッダーの同期ボタンから即時同期を実行し、結果（プル/プッシュ件数・
+   * 同期衝突）をトーストと状態表示へ反映する。完了後はツリーと索引を再読込し、
+   * 開いているノートへ syncVersion で最新化を通知する。
+   */
+  const runSync = useCallback(async (): Promise<void> => {
+    if (syncing) {
+      return;
+    }
+    setSyncing(true);
+    try {
+      const result = await run(syncVault({ owner, name }));
+      const newConflicts = result.conflicts ?? [];
+      setSyncConflicts(newConflicts);
+      setSyncVersion((version) => version + 1);
+      if (newConflicts.length > 0) {
+        const openConflict = notePath !== null && newConflicts.some((c) => c.path === notePath);
+        notify(
+          openConflict
+            ? '同期中に編集内容と GitHub の内容が衝突しました。差分を確認して解決してください。'
+            : `${newConflicts.length} 件の同期衝突があります。該当ノートを開いて解決してください。`,
+        );
+      } else {
+        const pushed = result.pushed ?? 0;
+        const pulled = result.pulled ?? 0;
+        notify(
+          pushed > 0 || pulled > 0
+            ? `同期しました（プル ${pulled} 件 / プッシュ ${pushed} 件）。`
+            : '同期しました（変更はありませんでした）。',
+        );
+      }
+      // ツリー・索引・同期状態を最新化する（ツリーは R2 から読み直すため GitHub は消費しない）
+      await load();
+      const status = await run(fetchVaultSyncStatus({ owner, name })).catch(() => null);
+      if (status !== null) {
+        setSyncStatus(status);
+      }
+    } catch (error) {
+      if (isSessionExpiredError(error)) {
+        notify('セッションの有効期限が切れました。ログインし直してください。');
+        onSessionExpired();
+        return;
+      }
+      notify(vaultErrorMessage(error));
+    } finally {
+      setSyncing(false);
+    }
+  }, [syncing, owner, name, notePath, notify, onSessionExpired, load]);
 
   // 共有索引からバックリンク / タグ索引を構築する（検索・クイックスイッチャーは
   // 同じ noteIndex を参照する。M2 / M3 のスコープ）。ツリーのファイル一覧は
@@ -322,6 +464,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     setIndexError(null);
     setOutlineContent('');
     setExpandedPaths(new Set(['']));
+    setPendingNotePath(null);
   }, [owner, name]);
 
   useEffect(() => {
@@ -413,13 +556,14 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   );
 
   /**
-   * ファイル操作（作成/リネーム/移動/削除）を一括コミットで実行する（M5）。
+   * ファイル操作（作成/リネーム/移動/削除/複製）を一括コミットで実行する（M5）。
    * 成功時はツリーを再読込し、開いているノートが操作の影響を受けた場合は
    * 新しいパス（移動・リネーム）へ、消えた場合は Vault ルートへ遷移する。
    * 張り替えられなかった曖昧参照がある場合は件数をトーストで通知する。
+   * 戻り値は成功したかどうか（コミットと検証をまとめて 1 回の成否判定にする）。
    */
   const runFileOperation = useCallback(
-    async (operation: FileOperation, successMessage: string): Promise<void> => {
+    async (operation: FileOperation, successMessage: string): Promise<boolean> => {
       try {
         const result = await run(applyFileOperation({ owner, name }, operation, filePaths));
         let message = successMessage;
@@ -429,11 +573,10 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
         notify(message);
         // ツリー + 共有索引を再読込する（索引はユースケースが更新済みのため再取得されない）
         await load();
-        // 開いているノートの遷移: 作成 → 新ノートを開く / 移動・リネーム → 新パス /
-        // 削除（ディレクトリ削除含む） → Vault ルート
-        if (operation.kind === 'create-note') {
-          navigate(noteRoutePath({ owner, name }, operation.path));
-        } else if (notePath !== null) {
+        // 開いているノートの遷移: 移動・リネーム → 新パス /
+        // 削除（ディレクトリ削除含む） → Vault ルート。
+        // 新規作成（create-note）の遷移は commitPendingNote が担う
+        if (notePath !== null) {
           const moved = result.movedPaths.find((move) => move.from === notePath);
           if (moved !== undefined) {
             navigate(noteRoutePath({ owner, name }, moved.to));
@@ -441,27 +584,135 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             navigate(vaultRoutePath({ owner, name }));
           }
         }
+        return true;
       } catch (error) {
         if (isSessionExpiredError(error)) {
           notify('セッションの有効期限が切れました。ログインし直してください。');
           onSessionExpired();
-          return;
+          return false;
         }
         notify(fileErrorMessage(error));
+        return false;
       }
     },
     [owner, name, filePaths, notePath, notify, onSessionExpired, load],
   );
 
-  /** ファイル操作の成功トースト文言（操作種別ごと） */
-  const fileOperationMessages: Record<FileOperation['kind'], string> = {
-    'create-note': 'ノートを作成しました。',
-    'create-directory': 'フォルダーを作成しました。',
-    'delete-note': 'ノートを削除しました。',
-    'delete-directory': 'フォルダーを削除しました。',
-    'rename-note': 'リネームしました。',
-    'rename-directory': 'リネームしました。',
-  };
+  /**
+   * Obsidian 式の複製名（`a copy.md` → `a copy 1.md` → …）を既存ファイルと
+   * 衝突しない形で計算する（ディレクトリは拡張子なし: `daily copy` → …）。
+   */
+  const nextDuplicatePath = useCallback(
+    (path: string, type: 'file' | 'directory'): string => {
+      const directory = parentDirectoryPath(path);
+      const base = pathBaseName(path);
+      const dot = base.lastIndexOf('.');
+      const stem = type === 'file' && dot > 0 ? base.slice(0, dot) : base;
+      const ext = type === 'file' && dot > 0 ? base.slice(dot) : '';
+      const existing = new Set(filePaths.map((p) => p.toLowerCase()));
+      let candidate = `${stem} copy${ext}`;
+      let index = 1;
+      while (existing.has(joinDirectoryPath(directory, candidate).toLowerCase())) {
+        candidate = `${stem} copy ${index}${ext}`;
+        index += 1;
+      }
+      return joinDirectoryPath(directory, candidate);
+    },
+    [filePaths],
+  );
+
+  /** 複製を作成し、複製先を選択状態にする（ノートは開く / フォルダは展開） */
+  const handleDuplicate = useCallback(
+    async (path: string, type: 'file' | 'directory'): Promise<void> => {
+      const to = nextDuplicatePath(path, type);
+      const kind = type === 'file' ? 'duplicate-note' : 'duplicate-directory';
+      const ok = await runFileOperation({ kind, from: path, to }, FILE_OPERATION_MESSAGES[kind]);
+      if (!ok) {
+        return;
+      }
+      if (type === 'file') {
+        navigate(noteRoutePath({ owner, name }, to));
+      } else {
+        setExpandedPaths((previous) => new Set(previous).add(to));
+      }
+    },
+    [nextDuplicatePath, runFileOperation, owner, name],
+  );
+
+  /** 未確定ノートのデフォルト名（Untitled.md / Untitled 1.md …）を決める */
+  const nextUntitledPath = useCallback(
+    (directory: string): string => {
+      const existing = new Set(filePaths.map((p) => p.toLowerCase()));
+      let candidate = 'Untitled.md';
+      let index = 1;
+      while (existing.has(joinDirectoryPath(directory, candidate).toLowerCase())) {
+        candidate = `Untitled ${index}.md`;
+        index += 1;
+      }
+      return joinDirectoryPath(directory, candidate);
+    },
+    [filePaths],
+  );
+
+  /** 新規ノートを開始する（Obsidian 式: デフォルト名でエディタを開き、コミットは保留） */
+  const startNewNote = useCallback(
+    (directory: string): void => {
+      const path = nextUntitledPath(directory);
+      setPendingNotePath(path);
+      navigate(noteRoutePath({ owner, name }, path));
+    },
+    [nextUntitledPath, owner, name],
+  );
+
+  /** 未確定ノートを最終名 + 本文で 1 コミットで作成する（成功で true） */
+  const commitPendingNote = useCallback(
+    async (finalName: string, content: string): Promise<boolean> => {
+      if (pendingNotePath === null) {
+        return false;
+      }
+      const finalPath = joinDirectoryPath(parentDirectoryPath(pendingNotePath), finalName);
+      const ok = await runFileOperation(
+        { kind: 'create-note', path: finalPath, content },
+        FILE_OPERATION_MESSAGES['create-note'],
+      );
+      if (ok) {
+        setPendingNotePath(null);
+        // リネームされた場合のみ最終パスへ遷移する（ユーザーが既に別ノートへ
+        // 移動していた場合は、その移動を上書きしない）
+        if (finalPath !== pendingNotePath && notePath === pendingNotePath) {
+          navigate(noteRoutePath({ owner, name }, finalPath));
+        }
+      }
+      return ok;
+    },
+    [pendingNotePath, runFileOperation, owner, name, notePath],
+  );
+
+  /** 未確定ノートを破棄する（Escape。何もコミットしない） */
+  const discardPendingNote = useCallback((): void => {
+    setPendingNotePath(null);
+    navigate(vaultRoutePath({ owner, name }));
+  }, [owner, name]);
+
+  /** 同期衝突の解決完了時に一覧から除去する（NotePane からの通知） */
+  const handleSyncConflictResolved = useCallback((path: string): void => {
+    setSyncConflicts((previous) => previous.filter((conflict) => conflict.path !== path));
+  }, []);
+
+  /** 同期状態の表示ラベル（最終同期時刻・失敗マーク。完了条件 10） */
+  const syncStatusLabel = syncing
+    ? '同期中…'
+    : syncStatus !== null && syncStatus.lastSyncError !== null
+      ? `同期失敗（${syncStatus.lastSyncError}）`
+      : syncStatus !== null && syncStatus.syncedAt !== null
+        ? `最終同期 ${formatSyncTime(syncStatus.syncedAt)}`
+        : '未同期';
+
+  /** 開いているノートに対応する同期衝突（無ければ null） */
+  const currentSyncConflict =
+    notePath === null
+      ? null
+      : (syncConflicts.find((conflict) => conflict.path === notePath) ?? null);
 
   return (
     <div
@@ -528,6 +779,11 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
             </Link>
             <h2 className="vault-title">{vaultRefFullName(vaultRef)}</h2>
           </div>
+          {initializing && (
+            <p className="app-placeholder" role="status">
+              Vault を初期同期しています…
+            </p>
+          )}
           {state.kind === 'loading' && (
             <p className="app-placeholder" role="status">
               ツリーを読み込み中…
@@ -565,18 +821,14 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
                 onRevealCurrent={revealCurrentNote}
                 onToggleAll={toggleAllDirectories}
                 allExpanded={allExpanded}
-                onCreateNote={(noteName) =>
+                onCreateNote={(directory) => startNewNote(directory)}
+                onCreateDirectory={(directory, directoryName) =>
                   void runFileOperation(
-                    { kind: 'create-note', path: noteName },
-                    fileOperationMessages['create-note'],
+                    { kind: 'create-directory', path: joinDirectoryPath(directory, directoryName) },
+                    FILE_OPERATION_MESSAGES['create-directory'],
                   )
                 }
-                onCreateDirectory={(directoryName) =>
-                  void runFileOperation(
-                    { kind: 'create-directory', path: directoryName },
-                    fileOperationMessages['create-directory'],
-                  )
-                }
+                onDuplicate={(path, type) => void handleDuplicate(path, type)}
                 onRename={(path, type, newName) =>
                   void runFileOperation(
                     {
@@ -584,7 +836,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
                       from: path,
                       to: joinDirectoryPath(parentDirectoryPath(path), newName),
                     },
-                    fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
+                    FILE_OPERATION_MESSAGES[type === 'file' ? 'rename-note' : 'rename-directory'],
                   )
                 }
                 onMove={(path, type, targetDirectory) =>
@@ -594,13 +846,13 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
                       from: path,
                       to: joinDirectoryPath(targetDirectory, pathBaseName(path)),
                     },
-                    fileOperationMessages[type === 'file' ? 'rename-note' : 'rename-directory'],
+                    FILE_OPERATION_MESSAGES[type === 'file' ? 'rename-note' : 'rename-directory'],
                   )
                 }
                 onDelete={(path, type) =>
                   void runFileOperation(
                     { kind: type === 'file' ? 'delete-note' : 'delete-directory', path },
-                    fileOperationMessages[type === 'file' ? 'delete-note' : 'delete-directory'],
+                    FILE_OPERATION_MESSAGES[type === 'file' ? 'delete-note' : 'delete-directory'],
                   )
                 }
               />
@@ -647,29 +899,63 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           <button type="button" aria-label="その他の操作">
             …
           </button>
+          <span className="workspace-navigation-spacer" />
+          <span
+            className={`sync-status${syncStatus !== null && syncStatus.lastSyncError !== null ? ' has-error' : ''}`}
+            data-testid="sync-status"
+            title={
+              syncStatus !== null && syncStatus.lastSyncError !== null
+                ? `定時同期が失敗しました（${syncStatus.lastSyncError}）。次回同期で自動リトライされます。`
+                : 'Vault と GitHub の最終同期時刻'
+            }
+          >
+            {syncStatusLabel}
+          </span>
+          <button
+            type="button"
+            className="button-secondary sync-button"
+            data-testid="sync-button"
+            onClick={() => void runSync()}
+            disabled={syncing || initializing || state.kind === 'loading'}
+          >
+            {syncing ? '同期中…' : '同期'}
+          </button>
         </div>
         {notePath !== null ? (
           <NotePane
             vaultRef={vaultRef}
             notePath={notePath}
             filePaths={filePaths}
+            pendingPath={pendingNotePath}
             notify={notify}
             onSessionExpired={onSessionExpired}
             onNoteSaved={handleNoteSaved}
             onNoteContentLoaded={setOutlineContent}
             onFileChanged={() => void load()}
-          />
-        ) : state.kind === 'ready' && state.tree.root.children.length === 0 ? (
-          <EmptyVaultCta
-            onCreateNote={(noteName) =>
-              void runFileOperation(
-                { kind: 'create-note', path: noteName },
-                fileOperationMessages['create-note'],
+            onPendingCommit={commitPendingNote}
+            onPendingDiscard={discardPendingNote}
+            onRenameNote={(path, newName) =>
+              runFileOperation(
+                {
+                  kind: 'rename-note',
+                  from: path,
+                  to: joinDirectoryPath(parentDirectoryPath(path), newName),
+                },
+                FILE_OPERATION_MESSAGES['rename-note'],
               )
             }
+            syncVersion={syncVersion}
+            syncConflict={currentSyncConflict}
+            onSyncConflictResolved={handleSyncConflictResolved}
           />
+        ) : state.kind === 'ready' && state.tree.root.children.length === 0 ? (
+          <EmptyVaultCta onCreateNote={() => startNewNote('')} />
         ) : (
-          <p className="app-placeholder">ツリーからファイルを選択してください。</p>
+          <p className="app-placeholder">
+            {initializing
+              ? 'Vault を初期同期しています…'
+              : 'ツリーからファイルを選択してください。'}
+          </p>
         )}
         <footer className="workspace-statusbar" aria-label="ステータスバー">
           <span>{state.kind === 'ready' ? state.tree.defaultBranch : 'main'}</span>

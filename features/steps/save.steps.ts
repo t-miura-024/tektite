@@ -2,10 +2,10 @@
  * ノート保存（features/save.feature）のステップ定義。
  *
  * 保存の検証は、アプリの API（/api/notes/.../blob/:path の GET）経由で
- * リモート（モックサーバー）の内容を再取得して行う。競合（409）は
- * モックサーバーのコントロールエンドポイント（POST /__mock/contents/...）で
- * リモート内容を書き換えて再現する。ログイン・ツリー操作・エディタ入力の
- * ステップは auth.feature / vault.feature / note.feature のものを再利用する。
+ * リモートの内容を再取得して行う。競合（409）は別クライアント（アプリ API への
+ * PUT）による更新で再現する（M4 の R2 先行化: 競合検出は R2 上のコンテンツ
+ * ハッシュ）。ログイン・ツリー操作・エディタ入力のステップは auth.feature /
+ * vault.feature / note.feature のものを再利用する。
  */
 
 import { expect } from '@playwright/test';
@@ -13,10 +13,7 @@ import { createBdd } from 'playwright-bdd';
 
 const { When, Then } = createBdd();
 
-/** モックサーバーのポート（playwright.config.ts の webServer と一致） */
-const MOCK_GITHUB_PORT = 4174;
-
-/** ノートパスをアプリ API / モックのパスセグメント（1 セグメントエンコード）に変換する */
+/** ノートパスをアプリ API のパスセグメント（1 セグメントエンコード）に変換する */
 function encodeNotePath(notePath: string): string {
   return encodeURIComponent(notePath);
 }
@@ -71,15 +68,30 @@ Then('リモートのノート {string} の内容は空である', async ({ page
   expect(body.content).toBe('');
 });
 
-/** モックサーバーの保存状態を直接書き換える（別クライアントによるリモート変更の再現） */
+/**
+ * 別クライアントによるリモート変更の再現（M4 の R2 先行化対応）。
+ * 保存時の競合検出は R2 上のコンテンツハッシュ（SHA-256）で行われるため、
+ * モック GitHub サーバーの状態書き換えではなく、アプリ自身の保存 API を
+ * 通して更新する（読込時 sha を取得して PUT する = ブラウザとは別クライアント）。
+ * これにより R2 の sha が変わり、ページ側の保存が 409 conflict になる。
+ */
 When(
-  'モックサーバーがノート {string} のリモート内容を {string} に変更する',
+  '別のクライアントがノート {string} を {string} に変更する',
   async ({ page }, notePath: string, content: string) => {
-    const response = await page.request.post(
-      `http://127.0.0.1:${MOCK_GITHUB_PORT}/__mock/contents/octocat/notes/${encodeNotePath(notePath)}`,
-      { data: { content } },
-    );
-    expect(response.ok()).toBeTruthy();
+    const noteUrl = `/api/notes/octocat/notes/blob/${encodeNotePath(notePath)}`;
+    const current = await page.request.get(noteUrl);
+    expect(current.ok()).toBeTruthy();
+    const currentBody = (await current.json()) as { sha?: unknown };
+    expect(typeof currentBody.sha).toBe('string');
+
+    const updated = await page.request.put(noteUrl, {
+      data: {
+        content: btoa(content),
+        sha: currentBody.sha,
+        message: 'E2E: 別クライアントによる更新',
+      },
+    });
+    expect(updated.ok()).toBeTruthy();
   },
 );
 

@@ -144,6 +144,118 @@ describe('applyFileOperation', () => {
     expect(registry.get(REF)?.notes.has('daily/.gitkeep')).toBe(true);
   });
 
+  it('create-note は content を渡すと本文込みで 1 コミットで作成する（Obsidian 式）', async () => {
+    const { result, gateway } = await runOperation({
+      kind: 'create-note',
+      path: 'new.md',
+      content: '# New\n',
+    });
+
+    expect(result.createdPaths).toEqual(['new.md']);
+    expect(gateway.lastInput()?.changes).toEqual([
+      { op: 'create', path: 'new.md', content: '# New\n' },
+    ]);
+    expect(gateway.lastInput()?.message).toBe('Create new.md');
+  });
+
+  it('duplicate-note は copy で内容を複製し、元は残す', async () => {
+    const { result, registry, gateway } = await runOperation({
+      kind: 'duplicate-note',
+      from: 'a.md',
+      to: 'a copy.md',
+    });
+
+    expect(result.createdPaths).toEqual(['a copy.md']);
+    expect(result.movedPaths).toEqual([]);
+    expect(result.removedPaths).toEqual([]);
+    expect(gateway.lastInput()).toEqual({
+      message: 'Duplicate a.md to a copy.md',
+      changes: [{ op: 'copy', path: 'a.md', to: 'a copy.md' }],
+    });
+    // 元と複製の両方が索引に残る（WikiLink は張り替えない）
+    expect(registry.get(REF)?.notes.get('a copy.md')?.content).toBe('# A\n\n[[b]] を参照する。\n');
+    expect(registry.get(REF)?.notes.get('a.md')).toBeDefined();
+  });
+
+  it('duplicate-note は存在しない移動元で失敗し、コミットしない', async () => {
+    const { error, gateway } = await runOperationEither({
+      kind: 'duplicate-note',
+      from: 'missing.md',
+      to: 'missing copy.md',
+    });
+    expect((error as FileCommitError).message).toBe('「missing.md」は存在しません。');
+    expect(gateway.lastInput()).toBeNull();
+  });
+
+  it('duplicate-note は複製先が既存なら失敗し、コミットしない', async () => {
+    const { error, gateway } = await runOperationEither({
+      kind: 'duplicate-note',
+      from: 'a.md',
+      to: 'b.md',
+    });
+    expect((error as FileCommitError).message).toBe('「b.md」は既に存在します。');
+    expect(gateway.lastInput()).toBeNull();
+  });
+
+  it('duplicate-directory は配下の全ファイル（添付含む）を複製し、元は残す', async () => {
+    const gateway = fakeGateway({
+      ...DATA,
+      notes: [
+        { path: 'projects/tektite.md', sha: 'sha-t', content: '# tektite\n' },
+        { path: 'index.md', sha: 'sha-i', content: '# Index\n\n[[tektite]]\n' },
+      ],
+    });
+    const paths = ['index.md', 'projects/tektite.md', 'projects/assets/logo.png'];
+    const {
+      result,
+      registry,
+      gateway: captured,
+    } = await runOperation(
+      { kind: 'duplicate-directory', from: 'projects', to: 'projects copy' },
+      paths,
+      gateway,
+    );
+
+    expect(result.createdPaths).toEqual(['projects copy']);
+    expect(captured.lastInput()?.changes).toEqual([
+      { op: 'copy', path: 'projects/tektite.md', to: 'projects copy/tektite.md' },
+      { op: 'copy', path: 'projects/assets/logo.png', to: 'projects copy/assets/logo.png' },
+    ]);
+    expect(captured.lastInput()?.message).toBe('Duplicate directory projects to projects copy');
+    // 元のノートも複製も残る（リンク張り替えなし）
+    expect(registry.get(REF)?.notes.get('projects/tektite.md')).toBeDefined();
+    expect(registry.get(REF)?.notes.get('projects copy/tektite.md')?.content).toBe('# tektite\n');
+  });
+
+  it('duplicate-directory は展開後の複製先が既存と衝突すると失敗し、コミットしない', async () => {
+    const gateway = fakeGateway({
+      ...DATA,
+      notes: [
+        { path: 'projects/tektite.md', sha: 'sha-t', content: '# tektite\n' },
+        { path: 'projects copy/tektite.md', sha: 'sha-c', content: '# copy\n' },
+      ],
+    });
+    const paths = ['projects/tektite.md', 'projects copy/tektite.md'];
+    const { error, gateway: captured } = await runOperationEither(
+      { kind: 'duplicate-directory', from: 'projects', to: 'projects copy' },
+      paths,
+      gateway,
+    );
+    expect((error as FileCommitError).message).toBe(
+      '複製先「projects copy/tektite.md」は既に存在します。',
+    );
+    expect(captured.lastInput()).toBeNull();
+  });
+
+  it('duplicate-directory は存在しないディレクトリで失敗する', async () => {
+    const { error } = await runOperationEither({
+      kind: 'duplicate-directory',
+      from: 'missing',
+      to: 'missing copy',
+    });
+    expect((error as FileCommitError).message).toBe('「missing」は存在しません。');
+  });
+
   it('delete-note は 1 コミットで削除し、索引からも除去する', async () => {
     const { result, registry, gateway } = await runOperation({
       kind: 'delete-note',

@@ -109,13 +109,16 @@ export interface NoteSaveRequest {
  * - move: from（path）を to へ移動する。本文は転送せず、サーバー側が base tree
  *   の blob sha を再利用する（添付ファイルなど本文をクライアントに持たない
  *   ファイルもディレクトリ移動で正しく動く。M5 方針 2 の一括コミット）
+ * - copy: from（path）の内容を to へ複製する。本文は転送せず、サーバー側が
+ *   base tree の blob sha を再利用して移動先に置く（move と違い元は残す）
  */
 export type FileChange =
   | { readonly op: 'create'; readonly path: string; readonly content: string }
   | { readonly op: 'create-binary'; readonly path: string; readonly base64: string }
   | { readonly op: 'update'; readonly path: string; readonly content: string }
   | { readonly op: 'delete'; readonly path: string }
-  | { readonly op: 'move'; readonly path: string; readonly to: string };
+  | { readonly op: 'move'; readonly path: string; readonly to: string }
+  | { readonly op: 'copy'; readonly path: string; readonly to: string };
 
 /** 一括コミットの入力（changes を 1 コミットに束ねる） */
 export interface CommitChangesInput {

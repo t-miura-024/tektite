@@ -31,12 +31,14 @@ import type { VaultRef } from '@/domain/vault';
 
 /** ファイル操作 1 件（path は Vault ルートからの / 区切りフルパス） */
 export type FileOperation =
-  | { readonly kind: 'create-note'; readonly path: string }
+  | { readonly kind: 'create-note'; readonly path: string; readonly content?: string }
   | { readonly kind: 'create-directory'; readonly path: string }
   | { readonly kind: 'delete-note'; readonly path: string }
   | { readonly kind: 'delete-directory'; readonly path: string }
   | { readonly kind: 'rename-note'; readonly from: string; readonly to: string }
-  | { readonly kind: 'rename-directory'; readonly from: string; readonly to: string };
+  | { readonly kind: 'rename-directory'; readonly from: string; readonly to: string }
+  | { readonly kind: 'duplicate-note'; readonly from: string; readonly to: string }
+  | { readonly kind: 'duplicate-directory'; readonly from: string; readonly to: string };
 
 /** 操作の結果（UI がツリー再読込・ノート遷移・警告表示に使う） */
 export interface FileOperationResult {
@@ -115,6 +117,10 @@ function commitMessage(operation: FileOperation): string {
       return `Rename ${operation.from} to ${operation.to}`;
     case 'rename-directory':
       return `Rename directory ${operation.from} to ${operation.to}`;
+    case 'duplicate-note':
+      return `Duplicate ${operation.from} to ${operation.to}`;
+    case 'duplicate-directory':
+      return `Duplicate directory ${operation.from} to ${operation.to}`;
   }
 }
 
@@ -146,7 +152,8 @@ function buildChanges(
     }
     return {
       ok: true,
-      changes: [{ op: 'create', path: operation.path, content: '' }],
+      // Obsidian 式の新規作成（Q11/Q15）: タイトル確定時に本文を含めて 1 コミットする
+      changes: [{ op: 'create', path: operation.path, content: operation.content ?? '' }],
       result: { removedPaths: [], movedPaths: [], createdPaths: [operation.path], issues: [] },
     };
   }
@@ -192,6 +199,48 @@ function buildChanges(
         createdPaths: [],
         issues: [],
       },
+    };
+  }
+
+  // 複製（Obsidian 式命名は UI 側が決め、to を渡す。内容はそのままコピーし
+  // WikiLink は張り替えない。copy はサーバー側で blob sha を再利用する）
+  if (operation.kind === 'duplicate-note') {
+    if (!isValidPath(operation.to) || !operation.to.endsWith('.md')) {
+      return validationFailure('複製先のノートパスが不正です。');
+    }
+    if (!existing.has(operation.from.toLowerCase())) {
+      return validationFailure(`「${operation.from}」は存在しません。`);
+    }
+    if (existing.has(operation.to.toLowerCase())) {
+      return validationFailure(`「${operation.to}」は既に存在します。`);
+    }
+    return {
+      ok: true,
+      changes: [{ op: 'copy', path: operation.from, to: operation.to }],
+      result: { removedPaths: [], movedPaths: [], createdPaths: [operation.to], issues: [] },
+    };
+  }
+
+  if (operation.kind === 'duplicate-directory') {
+    if (!isValidPath(operation.to)) {
+      return validationFailure('複製先のディレクトリパスが不正です。');
+    }
+    const children = filePaths.filter((path) => isUnderDirectory(path, operation.from));
+    if (children.length === 0) {
+      return validationFailure(`「${operation.from}」は存在しません。`);
+    }
+    const copies = children.map((path) => ({
+      from: path,
+      to: `${operation.to}${path.slice(operation.from.length)}`,
+    }));
+    const colliding = copies.find((copy) => existing.has(copy.to.toLowerCase()));
+    if (colliding !== undefined) {
+      return validationFailure(`複製先「${colliding.to}」は既に存在します。`);
+    }
+    return {
+      ok: true,
+      changes: copies.map((copy) => ({ op: 'copy', path: copy.from, to: copy.to })),
+      result: { removedPaths: [], movedPaths: [], createdPaths: [operation.to], issues: [] },
     };
   }
 

@@ -1,8 +1,14 @@
 import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
-import { VaultFetchError, VaultGateway, listVaults, openVault } from '@/application/vault';
-import type { VaultTreeData } from '@/application/vault';
+import {
+  VaultFetchError,
+  VaultGateway,
+  initializeVault,
+  listVaults,
+  openVault,
+} from '@/application/vault';
+import type { VaultSyncResult, VaultSyncStatus, VaultTreeData } from '@/application/vault';
 import type { Vault, VaultRef } from '@/domain/vault';
 
 const REF: VaultRef = { owner: 'octocat', name: 'notes' };
@@ -19,7 +25,16 @@ const VAULTS: readonly Vault[] = [
   },
 ];
 
-function createGatewayStub(treeData: VaultTreeData): VaultGateway {
+function createGatewayStub(
+  treeData: VaultTreeData,
+  syncResult: VaultSyncResult = {
+    owner: 'octocat',
+    name: 'notes',
+    status: 'already_synced',
+    defaultBranch: 'main',
+    notes: 0,
+  },
+): VaultGateway {
   return {
     listVaults: vi
       .fn<() => Effect.Effect<readonly Vault[], VaultFetchError>>()
@@ -27,6 +42,21 @@ function createGatewayStub(treeData: VaultTreeData): VaultGateway {
     fetchTree: vi
       .fn<(ref: VaultRef) => Effect.Effect<VaultTreeData, VaultFetchError>>()
       .mockReturnValue(Effect.succeed(treeData)),
+    initializeSync: vi
+      .fn<(ref: VaultRef) => Effect.Effect<VaultSyncResult, VaultFetchError>>()
+      .mockReturnValue(Effect.succeed(syncResult)),
+    syncVault: vi
+      .fn<(ref: VaultRef) => Effect.Effect<VaultSyncResult, VaultFetchError>>()
+      .mockReturnValue(Effect.succeed(syncResult)),
+    fetchSyncStatus: vi.fn<(ref: VaultRef) => Effect.Effect<VaultSyncStatus, VaultFetchError>>(),
+    resolveSyncConflict:
+      vi.fn<
+        (
+          ref: VaultRef,
+          path: string,
+          resolution: 'overwrite' | 'adopt',
+        ) => Effect.Effect<string, VaultFetchError>
+      >(),
   };
 }
 
@@ -69,6 +99,17 @@ describe('vault ユースケース', () => {
           Effect.fail(new VaultFetchError('rate_limited', 'レートリミットに達しました。')),
         ),
       fetchTree: vi.fn<(ref: VaultRef) => Effect.Effect<VaultTreeData, VaultFetchError>>(),
+      initializeSync: vi.fn<(ref: VaultRef) => Effect.Effect<VaultSyncResult, VaultFetchError>>(),
+      syncVault: vi.fn<(ref: VaultRef) => Effect.Effect<VaultSyncResult, VaultFetchError>>(),
+      fetchSyncStatus: vi.fn<(ref: VaultRef) => Effect.Effect<VaultSyncStatus, VaultFetchError>>(),
+      resolveSyncConflict:
+        vi.fn<
+          (
+            ref: VaultRef,
+            path: string,
+            resolution: 'overwrite' | 'adopt',
+          ) => Effect.Effect<string, VaultFetchError>
+        >(),
     };
     const result = await Effect.runPromise(
       Effect.either(Effect.provide(listVaults, provideStub(gateway))),
@@ -77,5 +118,24 @@ describe('vault ユースケース', () => {
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(VaultFetchError);
     }
+  });
+
+  it('initializeVault はゲートウェイの初期同期を実行して結果を返す', async () => {
+    const syncResult: VaultSyncResult = {
+      owner: 'octocat',
+      name: 'notes',
+      status: 'initialized',
+      defaultBranch: 'main',
+      notes: 3,
+    };
+    const gateway = createGatewayStub(
+      { defaultBranch: 'main', truncated: false, entries: [] },
+      syncResult,
+    );
+    const result = await Effect.runPromise(
+      Effect.provide(initializeVault(REF), provideStub(gateway)),
+    );
+    expect(result).toEqual(syncResult);
+    expect(gateway.initializeSync).toHaveBeenCalledWith(REF);
   });
 });

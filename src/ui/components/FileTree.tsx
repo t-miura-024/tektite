@@ -1,19 +1,22 @@
 /**
- * ファイルツリー表示 + ファイル操作（M5: 作成・リネーム・移動・削除）。
+ * ファイルツリー表示 + ファイル操作（作成・リネーム・移動・複製・削除）。
  *
  * - ドメイン層が構築したツリー（src/domain/tree）を描画する
  * - ファイル選択はノートパスの URL（/:owner/:repo/blob/:path）へ SPA 遷移
- * - ツールバー: 新規ノート / 新規フォルダー（ルート直下に作成するインライン入力）
- * - コンテキストメニュー（右クリック）: リネーム（ツリー内インライン入力）/
- *   移動（移動先ダイアログ）/ 削除（確認ダイアログ）。削除は GitHub 上の実削除
- *   のため必ず確認ダイアログを挟む（ゴミ箱なしの方針）
+ * - ツールバー: 新規ノート（Obsidian 式: デフォルト名で即作成しエディタで開く）/
+ *   新規フォルダー（ツリー内インライン入力）
+ * - コンテキストメニュー（右クリック）: 右クリック対象で出し分ける
+ *   - フォルダ: 新規ノート / 新規フォルダ ─ 複製を作成 / 名前を変更 / 移動… ─ 削除
+ *   - ノート: 複製を作成 / 名前を変更 / 移動… ─ 削除
+ *   - 空き領域: 新規ノート / 新規フォルダ（ルート直下）
+ *   - キーボード: ↑↓ で項目移動 / Enter で実行 / Escape で閉じる
  * - 実際の操作（一括コミット）は VaultScreen のコールバックが担い、ここでは
  *   操作 UI の状態（入力・メニュー・ダイアログ）だけを持つ
  * - role="tree" / treeitem でスクリーンリーダーにも構造が伝わるようにする
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties, MouseEvent } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 
 import { validateEntryName } from '@/application/file';
 import type { TreeDirectory, TreeNode } from '@/domain/tree';
@@ -33,10 +36,12 @@ export interface FileTreeProps {
   /** 選択中のノートパス（未選択は null） */
   selectedPath: string | null;
   onToggleDirectory: (path: string) => void;
-  /** 新規ノート（ルート直下）をコミットする */
-  onCreateNote: (name: string) => void;
-  /** 新規フォルダー（ルート直下）をコミットする */
-  onCreateDirectory: (name: string) => void;
+  /** 新規ノート（Obsidian 式: directory 直下にデフォルト名で作成し、エディタで開く） */
+  onCreateNote: (directory: string) => void;
+  /** 新規フォルダー（directory 直下に name で作成する） */
+  onCreateDirectory: (directory: string, name: string) => void;
+  /** 複製を作成する（対象パスと種別） */
+  onDuplicate: (path: string, type: 'file' | 'directory') => void;
   onOpenSearch?: () => void;
   onOpenQuickSwitcher?: () => void;
   onRevealCurrent?: () => void;
@@ -50,13 +55,24 @@ export interface FileTreeProps {
   onDelete: (path: string, type: 'file' | 'directory') => void;
 }
 
+/** コンテキストメニュー 1 項目 */
+interface MenuItem {
+  readonly key: string;
+  readonly label: string;
+  /** グループ（区切り線の挿入に使う） */
+  readonly group: 'create' | 'operate' | 'danger';
+  readonly onSelect: () => void;
+}
+
 /** コンテキストメニューの表示状態（座標は固定配置用のビューポート座標） */
 interface MenuState {
-  readonly path: string;
-  readonly type: 'file' | 'directory';
   readonly x: number;
   readonly y: number;
+  readonly items: readonly MenuItem[];
 }
+
+/** コンテキストメニューを開く対象（項目 or 空き領域） */
+type MenuTarget = { readonly path: string; readonly type: 'file' | 'directory' } | 'root';
 
 /** ツリーから全ディレクトリパス（ルート '' を含む）を収集する */
 function collectDirectories(root: TreeDirectory): string[] {
@@ -127,6 +143,75 @@ function ActionIcon({ name }: { name: ActionIconName }) {
   );
 }
 
+/** 新規フォルダーのインライン入力（Enter で確定・Escape で解除。検証は入力内で行う） */
+function CreateDirectoryEditor({
+  onSubmit,
+  onCancel,
+}: {
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const submit = (): void => {
+    const name = value.trim();
+    const message = validateEntryName(name, false);
+    if (message !== null) {
+      setError(message);
+      return;
+    }
+    onSubmit(name);
+  };
+
+  return (
+    <div className="file-tree-editor" data-testid="file-tree-editor">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        aria-label="新しいフォルダー名"
+        data-testid="file-tree-editor-input"
+        placeholder="フォルダー名（例: daily）"
+        onChange={(event) => {
+          setValue(event.target.value);
+          setError(null);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            submit();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+      />
+      <button
+        type="button"
+        className="button-primary"
+        data-testid="file-tree-editor-submit"
+        onClick={submit}
+      >
+        作成
+      </button>
+      <button type="button" className="button-secondary" onClick={onCancel}>
+        キャンセル
+      </button>
+      {error !== null && (
+        <p className="file-tree-editor-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function FileTree({
   root,
   vaultRef,
@@ -135,6 +220,7 @@ export function FileTree({
   onToggleDirectory,
   onCreateNote,
   onCreateDirectory,
+  onDuplicate,
   onOpenSearch,
   onOpenQuickSwitcher,
   onRevealCurrent,
@@ -146,8 +232,11 @@ export function FileTree({
 }: FileTreeProps) {
   /** コンテキストメニュー（null は非表示） */
   const [menu, setMenu] = useState<MenuState | null>(null);
-  /** 作成フォーム（null は非表示） */
-  const [creating, setCreating] = useState<'note' | 'directory' | null>(null);
+  /** キーボード操作中のメニュー項目位置 */
+  const [menuActive, setMenuActive] = useState(0);
+  const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  /** 新規フォルダー作成フォーム（'' はルート直下） */
+  const [creating, setCreating] = useState<string | null>(null);
   /** リネーム対象（null は非表示） */
   const [renaming, setRenaming] = useState<{ path: string; type: 'file' | 'directory' } | null>(
     null,
@@ -161,10 +250,6 @@ export function FileTree({
     path: string;
     type: 'file' | 'directory';
   } | null>(null);
-  /** 作成フォームの入力値とエラー */
-  const [createValue, setCreateValue] = useState('');
-  const [createError, setCreateError] = useState<string | null>(null);
-  const createInputRef = useRef<HTMLInputElement | null>(null);
 
   // ツリーが差し替わる（操作後の再読込・Vault 切替）たびに操作 UI を閉じる
   useEffect(() => {
@@ -174,13 +259,6 @@ export function FileTree({
     setMoveTarget(null);
     setDeleteTarget(null);
   }, [root]);
-
-  // 作成フォームが開いたら入力へフォーカスする
-  useEffect(() => {
-    if (creating !== null) {
-      createInputRef.current?.focus();
-    }
-  }, [creating]);
 
   // メニュー表示中は外部クリックで閉じる（メニュー内クリックは閉じない）
   useEffect(() => {
@@ -199,64 +277,127 @@ export function FileTree({
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [menu]);
 
+  // メニューが開いたら最初の項目へフォーカスする（キーボード操作の起点）
+  useEffect(() => {
+    if (menu === null) {
+      return;
+    }
+    setMenuActive(0);
+    menuItemRefs.current[0]?.focus();
+  }, [menu]);
+
   const directories = useCallback(() => collectDirectories(root), [root]);
 
-  /** コンテキストメニューを開く（座標はビューポート内にクランプする） */
-  const openMenu = useCallback((path: string, type: 'file' | 'directory', x: number, y: number) => {
-    const width = 160;
-    const height = 120;
-    setMenu({
-      path,
-      type,
-      x: Math.max(0, Math.min(x, window.innerWidth - width)),
-      y: Math.max(0, Math.min(y, window.innerHeight - height)),
-    });
-  }, []);
+  /** 新規フォルダー作成フォームを開く（閉じたフォルダなら自動展開する） */
+  const openCreate = useCallback(
+    (directory: string) => {
+      if (directory !== '' && !expandedPaths.has(directory)) {
+        onToggleDirectory(directory);
+      }
+      setCreating(directory);
+    },
+    [expandedPaths, onToggleDirectory],
+  );
 
-  /** メニュー操作を実行し、メニューを閉じる */
-  const handleMenuAction = useCallback(
-    (action: 'rename' | 'move' | 'delete') => {
+  /** コンテキストメニューを開く（座標はビューポート内にクランプする） */
+  const openMenu = useCallback(
+    (target: MenuTarget, x: number, y: number) => {
+      const width = 180;
+      const height = 230;
+      const items: MenuItem[] = [];
+      if (target === 'root') {
+        items.push({
+          key: 'create-note',
+          label: '新規ノート',
+          group: 'create',
+          onSelect: () => onCreateNote(''),
+        });
+        items.push({
+          key: 'create-directory',
+          label: '新規フォルダ',
+          group: 'create',
+          onSelect: () => openCreate(''),
+        });
+      } else {
+        if (target.type === 'directory') {
+          items.push({
+            key: 'create-note',
+            label: '新規ノート',
+            group: 'create',
+            onSelect: () => onCreateNote(target.path),
+          });
+          items.push({
+            key: 'create-directory',
+            label: '新規フォルダ',
+            group: 'create',
+            onSelect: () => openCreate(target.path),
+          });
+        }
+        items.push({
+          key: 'duplicate',
+          label: '複製を作成',
+          group: 'operate',
+          onSelect: () => onDuplicate(target.path, target.type),
+        });
+        items.push({
+          key: 'rename',
+          label: '名前を変更',
+          group: 'operate',
+          onSelect: () => setRenaming({ path: target.path, type: target.type }),
+        });
+        items.push({
+          key: 'move',
+          label: '移動…',
+          group: 'operate',
+          onSelect: () => setMoveTarget({ path: target.path, type: target.type }),
+        });
+        items.push({
+          key: 'delete',
+          label: '削除',
+          group: 'danger',
+          onSelect: () => setDeleteTarget({ path: target.path, type: target.type }),
+        });
+      }
+      setMenu({
+        x: Math.max(0, Math.min(x, window.innerWidth - width)),
+        y: Math.max(0, Math.min(y, window.innerHeight - height)),
+        items,
+      });
+    },
+    [onCreateNote, onDuplicate, openCreate],
+  );
+
+  /** メニューのキーボード操作（↑↓ で移動 / Enter で実行 / Escape で閉じる） */
+  const handleMenuKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
       if (menu === null) {
         return;
       }
-      const target = menu;
-      setMenu(null);
-      if (action === 'rename') {
-        setRenaming({ path: target.path, type: target.type });
-      } else if (action === 'move') {
-        setMoveTarget({ path: target.path, type: target.type });
-      } else {
-        setDeleteTarget({ path: target.path, type: target.type });
+      const count = menu.items.length;
+      const focusAt = (index: number): void => {
+        setMenuActive(index);
+        menuItemRefs.current[index]?.focus();
+      };
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        focusAt((menuActive + 1) % count);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        focusAt((menuActive - 1 + count) % count);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        const item = menu.items[menuActive];
+        if (item !== undefined) {
+          setMenu(null);
+          item.onSelect();
+        }
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        setMenu(null);
       }
     },
-    [menu],
+    [menu, menuActive],
   );
-
-  /** 作成フォームを開く */
-  const openCreate = useCallback((kind: 'note' | 'directory') => {
-    setCreateValue('');
-    setCreateError(null);
-    setCreating(kind);
-  }, []);
-
-  /** 作成フォームの確定（名前を検証してコールバックへ渡す） */
-  const submitCreate = useCallback(() => {
-    if (creating === null) {
-      return;
-    }
-    const name = createValue.trim();
-    const error = validateEntryName(name, creating === 'note');
-    if (error !== null) {
-      setCreateError(error);
-      return;
-    }
-    if (creating === 'note') {
-      onCreateNote(name);
-    } else {
-      onCreateDirectory(name);
-    }
-    setCreating(null);
-  }, [creating, createValue, onCreateNote, onCreateDirectory]);
 
   /** リネーム入力の確定（名前を検証してコールバックへ渡す） */
   const submitRename = useCallback(
@@ -288,7 +429,7 @@ export function FileTree({
           data-testid="file-create-note-button"
           aria-label="新規ノート"
           title="新規ノート"
-          onClick={() => openCreate('note')}
+          onClick={() => onCreateNote('')}
         >
           <ActionIcon name="file-plus" />
         </button>
@@ -298,7 +439,7 @@ export function FileTree({
           data-testid="file-create-directory-button"
           aria-label="新規フォルダー"
           title="新規フォルダー"
-          onClick={() => openCreate('directory')}
+          onClick={() => openCreate('')}
         >
           <ActionIcon name="folder-plus" />
         </button>
@@ -341,100 +482,79 @@ export function FileTree({
           <ActionIcon name={allExpanded ? 'collapse' : 'expand'} />
         </button>
       </div>
-      {creating !== null && (
-        <div className="file-tree-editor" data-testid="file-tree-editor">
-          <input
-            ref={createInputRef}
-            type="text"
-            value={createValue}
-            aria-label={creating === 'note' ? '新しいノート名' : '新しいフォルダー名'}
-            data-testid="file-tree-editor-input"
-            placeholder={
-              creating === 'note' ? 'ノート名（例: memo.md）' : 'フォルダー名（例: daily）'
-            }
-            onChange={(event) => {
-              setCreateValue(event.target.value);
-              setCreateError(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                submitCreate();
-              } else if (event.key === 'Escape') {
-                setCreating(null);
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="button-primary"
-            data-testid="file-tree-editor-submit"
-            onClick={submitCreate}
-          >
-            作成
-          </button>
-          <button type="button" className="button-secondary" onClick={() => setCreating(null)}>
-            キャンセル
-          </button>
-          {createError !== null && (
-            <p className="file-tree-editor-error" role="alert">
-              {createError}
-            </p>
-          )}
-        </div>
+      {creating === '' && (
+        <CreateDirectoryEditor
+          onSubmit={(name) => {
+            onCreateDirectory('', name);
+            setCreating(null);
+          }}
+          onCancel={() => setCreating(null)}
+        />
       )}
-      {root.children.length === 0 ? (
-        <p className="app-placeholder">表示できるファイルがありません。</p>
-      ) : (
-        <ul role="tree" className="file-tree">
-          {root.children.map((child) => (
-            <FileTreeNode
-              key={child.path}
-              node={child}
-              depth={0}
-              vaultRef={vaultRef}
-              expandedPaths={expandedPaths}
-              selectedPath={selectedPath}
-              renamingPath={renaming?.path ?? null}
-              onToggleDirectory={onToggleDirectory}
-              onOpenMenu={openMenu}
-              onRenameSubmit={submitRename}
-              onRenameCancel={() => setRenaming(null)}
-            />
-          ))}
-        </ul>
-      )}
+      <div
+        className="file-tree-region"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          openMenu('root', event.clientX, event.clientY);
+        }}
+      >
+        {root.children.length === 0 ? (
+          <p className="app-placeholder">表示できるファイルがありません。</p>
+        ) : (
+          <ul role="tree" className="file-tree">
+            {root.children.map((child) => (
+              <FileTreeNode
+                key={child.path}
+                node={child}
+                depth={0}
+                vaultRef={vaultRef}
+                expandedPaths={expandedPaths}
+                selectedPath={selectedPath}
+                renamingPath={renaming?.path ?? null}
+                creatingDirectory={creating}
+                onToggleDirectory={onToggleDirectory}
+                onOpenMenu={openMenu}
+                onCreateDirectory={(directory, name) => {
+                  onCreateDirectory(directory, name);
+                  setCreating(null);
+                }}
+                onCancelCreate={() => setCreating(null)}
+                onRenameSubmit={submitRename}
+                onRenameCancel={() => setRenaming(null)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
       {menu !== null && (
         <div
           className="file-context-menu"
           role="menu"
           data-testid="file-context-menu"
           style={{ left: menu.x, top: menu.y }}
+          onKeyDown={handleMenuKeyDown}
         >
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="file-menu-rename"
-            onClick={() => handleMenuAction('rename')}
-          >
-            リネーム
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="file-menu-move"
-            onClick={() => handleMenuAction('move')}
-          >
-            移動…
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="file-menu-delete"
-            onClick={() => handleMenuAction('delete')}
-          >
-            削除
-          </button>
+          {menu.items.map((item, index) => (
+            <Fragment key={item.key}>
+              {index > 0 && item.group !== menu.items[index - 1]?.group && (
+                <div className="file-context-menu-separator" role="separator" />
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                data-testid={`file-menu-${item.key}`}
+                ref={(element) => {
+                  menuItemRefs.current[index] = element;
+                }}
+                onClick={() => {
+                  setMenu(null);
+                  item.onSelect();
+                }}
+              >
+                {item.label}
+              </button>
+            </Fragment>
+          ))}
         </div>
       )}
       {moveTarget !== null && (
@@ -484,8 +604,12 @@ interface FileTreeNodeProps {
   selectedPath: string | null;
   /** リネーム入力で置き換える対象パス（null は非表示） */
   renamingPath: string | null;
+  /** 新規フォルダー作成フォームを表示するディレクトリパス（null は非表示） */
+  creatingDirectory: string | null;
   onToggleDirectory: (path: string) => void;
-  onOpenMenu: (path: string, type: 'file' | 'directory', x: number, y: number) => void;
+  onOpenMenu: (target: MenuTarget, x: number, y: number) => void;
+  onCreateDirectory: (directory: string, name: string) => void;
+  onCancelCreate: () => void;
   onRenameSubmit: (newName: string) => void;
   onRenameCancel: () => void;
 }
@@ -497,8 +621,11 @@ function FileTreeNode({
   expandedPaths,
   selectedPath,
   renamingPath,
+  creatingDirectory,
   onToggleDirectory,
   onOpenMenu,
+  onCreateDirectory,
+  onCancelCreate,
   onRenameSubmit,
   onRenameCancel,
 }: FileTreeNodeProps) {
@@ -506,7 +633,8 @@ function FileTreeNode({
   const isRenaming = renamingPath === node.path;
   const openMenuAt = (event: MouseEvent): void => {
     event.preventDefault();
-    onOpenMenu(node.path, node.type, event.clientX, event.clientY);
+    event.stopPropagation();
+    onOpenMenu({ path: node.path, type: node.type }, event.clientX, event.clientY);
   };
 
   if (node.type === 'file') {
@@ -567,6 +695,14 @@ function FileTreeNode({
       </button>
       {isOpen && (
         <ul role="group" className="file-tree-group">
+          {creatingDirectory === node.path && (
+            <li role="treeitem" className="file-tree-item">
+              <CreateDirectoryEditor
+                onSubmit={(name) => onCreateDirectory(node.path, name)}
+                onCancel={onCancelCreate}
+              />
+            </li>
+          )}
           {node.children.map((child) => (
             <FileTreeNode
               key={child.path}
@@ -576,8 +712,11 @@ function FileTreeNode({
               expandedPaths={expandedPaths}
               selectedPath={selectedPath}
               renamingPath={renamingPath}
+              creatingDirectory={creatingDirectory}
               onToggleDirectory={onToggleDirectory}
               onOpenMenu={onOpenMenu}
+              onCreateDirectory={onCreateDirectory}
+              onCancelCreate={onCancelCreate}
               onRenameSubmit={onRenameSubmit}
               onRenameCancel={onRenameCancel}
             />
