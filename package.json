@@ -17,7 +17,7 @@
     "visual:compare-dom": "node scripts/visual-parity/compare-dom.mjs",
     "visual:compare-regions": "node scripts/visual-parity/compare-regions.mjs",
     "test:e2e": "bddgen && playwright test",
-    "deploy": "wrangler deploy"
+    "deploy": "node scripts/expand-config.mjs && wrangler deploy --config .wrangler.deploy.jsonc"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",

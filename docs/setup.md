@@ -30,15 +30,13 @@ Workers は `wrangler deploy` で Worker 自体が自動的に作成されるた
    # 出力例: {"id":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","title":"tektite-tokens"}
    ```
 
-3. `wrangler.jsonc` の `kv_namespaces[0].id` を、手順 2 の id に設定する（wrangler 4.x は `wrangler.jsonc` のバインディング id での環境変数補間に対応しないため、実 id を直接書く）:
+3. 手順 2 の id はデプロイ時に `TEKTITE_KV_NAMESPACE_ID` 環境変数として渡す。`wrangler.jsonc` は `${TEKTITE_KV_NAMESPACE_ID}` プレースホルダのままでよく、`pnpm deploy` が展開して `.wrangler.deploy.jsonc`（gitignore 済み）を生成する（wrangler 4.x は `wrangler.jsonc` のバインディング id での環境変数補間に対応しないため、展開スクリプト `scripts/expand-config.mjs` で行う）:
 
-   ```jsonc
-   {
-     "kv_namespaces": [{ "binding": "TOKEN_KV", "id": "<手順 2 の id>" }],
-   }
+   ```sh
+   TEKTITE_KV_NAMESPACE_ID=<手順 2 の id> pnpm deploy
    ```
 
-   CI デプロイ（`.github/workflows/deploy.yml`）は KV namespace を冪等作成するが、`wrangler.jsonc` の id はリポジトリにコミット済みの実 id を使う（詳しくは「8. デプロイ」参照）。
+   CI デプロイ（`.github/workflows/deploy.yml`）は KV namespace を冪等作成して id を自動解決するため、環境変数の設定は不要（詳しくは「8. デプロイ」参照）。
 
 **確認方法:**
 
@@ -202,7 +200,7 @@ pnpm build
 pnpm exec wrangler dev --port 4173
 ```
 
-`wrangler dev` は `wrangler.jsonc` の `main`（`dist/index.js`）と `assets`（`dist/`）を読み、KV / R2 / Static Assets をローカルシミュレーションする。KV namespace の `id` はローカルでは検証されない（実 id を書いていてもローカルシミュレーションに使われる）。
+`wrangler dev` は `wrangler.jsonc` の `main`（`dist/index.js`）と `assets`（`dist/`）を読み、KV / R2 / Static Assets をローカルシミュレーションする。KV namespace の `id` はローカルでは検証されない（プレースホルダのままでもローカルシミュレーションに使われる）。
 
 OAuth モードで実ログインを検証する場合、`.dev.vars` の `OAUTH_REDIRECT_URI` は `http://localhost:5173/api/auth/callback` を使い、この URL を OAuth App の callback として登録する（GitHub OAuth App は localhost の callback も登録可能）。PAT モードでは不要。
 
@@ -267,7 +265,7 @@ E2E は `features/**/*.feature`（受け入れ基準の Gherkin）を playwright
 
 ### デプロイの実行
 
-- **自動デプロイ**: `main` への push で `.github/workflows/deploy.yml` が実行され、R2 バケット / KV namespace を冪等に作成した上で `pnpm deploy`（`wrangler deploy`）により Cloudflare Workers へ自動デプロイされる
+- **自動デプロイ**: `main` への push で `.github/workflows/deploy.yml` が実行され、R2 バケット / KV namespace を冪等に作成し、KV namespace の id を自動解決した上で `pnpm deploy` により Cloudflare Workers へ自動デプロイされる
 - **手動デプロイ**: secrets 設定後に push をせずに再実行したい場合:
 
   ```sh
@@ -280,11 +278,11 @@ E2E は `features/**/*.feature`（受け入れ基準の Gherkin）を playwright
   gh run list --workflow deploy.yml --limit 1
   ```
 
-- **ローカルからの手動デプロイ**: `wrangler.jsonc` にコミット済みの KV namespace id（手順 1 で作成したもの）を使う。作成し直した場合は実 id に置き換えてから:
+- **ローカルからの手動デプロイ**: 手順 1 で作成した KV namespace の id を `TEKTITE_KV_NAMESPACE_ID` 環境変数で渡す（`pnpm deploy` が展開して `.wrangler.deploy.jsonc` を生成する）:
 
   ```sh
   pnpm build
-  pnpm deploy
+  TEKTITE_KV_NAMESPACE_ID=<手順 2 の id> pnpm deploy
   ```
 
 - デプロイの実行ログからデプロイ URL が確認できる:
