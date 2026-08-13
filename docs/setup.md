@@ -30,7 +30,7 @@ Workers は `wrangler deploy` で Worker 自体が自動的に作成されるた
    # 出力例: {"id":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","title":"tektite-tokens"}
    ```
 
-3. `wrangler.jsonc` の `kv_namespaces[0].id` を、手順 2 の id（または `TEKTITE_KV_NAMESPACE_ID` 環境変数）に設定する:
+3. `wrangler.jsonc` の `kv_namespaces[0].id` を、手順 2 の id に設定する（wrangler 4.x は `wrangler.jsonc` のバインディング id での環境変数補間に対応しないため、実 id を直接書く）:
 
    ```jsonc
    {
@@ -38,7 +38,7 @@ Workers は `wrangler deploy` で Worker 自体が自動的に作成されるた
    }
    ```
 
-   CI デプロイでは `${TEKTITE_KV_NAMESPACE_ID}` 補間を使うため、ローカル手動デプロイではこの置き換えが不要になる（詳しくは「8. デプロイ」参照）。
+   CI デプロイ（`.github/workflows/deploy.yml`）は KV namespace を冪等作成するが、`wrangler.jsonc` の id はリポジトリにコミット済みの実 id を使う（詳しくは「8. デプロイ」参照）。
 
 **確認方法:**
 
@@ -202,7 +202,7 @@ pnpm build
 pnpm exec wrangler dev --port 4173
 ```
 
-`wrangler dev` は `wrangler.jsonc` の `main`（`dist/index.js`）と `assets`（`dist/`）を読み、KV / R2 / Static Assets をローカルシミュレーションする。KV namespace の `id` はローカルでは検証されないため、`TEKTITE_KV_NAMESPACE_ID` が未設定でも動く（未設定時は空文字として扱われる）。
+`wrangler dev` は `wrangler.jsonc` の `main`（`dist/index.js`）と `assets`（`dist/`）を読み、KV / R2 / Static Assets をローカルシミュレーションする。KV namespace の `id` はローカルでは検証されない（実 id を書いていてもローカルシミュレーションに使われる）。
 
 OAuth モードで実ログインを検証する場合、`.dev.vars` の `OAUTH_REDIRECT_URI` は `http://localhost:5173/api/auth/callback` を使い、この URL を OAuth App の callback として登録する（GitHub OAuth App は localhost の callback も登録可能）。PAT モードでは不要。
 
@@ -280,7 +280,7 @@ E2E は `features/**/*.feature`（受け入れ基準の Gherkin）を playwright
   gh run list --workflow deploy.yml --limit 1
   ```
 
-- **ローカルからの手動デプロイ**: 手順 1 で作成した KV namespace の id を `wrangler.jsonc` に設定（または `TEKTITE_KV_NAMESPACE_ID` 環境変数で補間）した上で:
+- **ローカルからの手動デプロイ**: `wrangler.jsonc` にコミット済みの KV namespace id（手順 1 で作成したもの）を使う。作成し直した場合は実 id に置き換えてから:
 
   ```sh
   pnpm build
