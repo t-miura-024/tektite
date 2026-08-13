@@ -54,6 +54,23 @@ When('ユーザーが作成を確定する', async ({ page }) => {
   await page.getByTestId('file-tree-editor-submit').click();
 });
 
+// ---- 新規ノート（Obsidian 式: デフォルト名 → タイトル編集で確定） ----
+
+When('ユーザーがノートタイトルを {string} に編集する', async ({ page }, name: string) => {
+  // タイトルをクリックして編集モードにし、名前（拡張子なし）を入力して Enter で確定
+  await page.getByTestId('editor-title').click();
+  await page.getByTestId('editor-title-input').fill(name);
+  await page.keyboard.press('Enter');
+});
+
+Then('エディタのタイトルが {string} である', async ({ page }, name: string) => {
+  await expect(page.getByTestId('editor-title')).toHaveText(name);
+});
+
+When('ユーザーが別のファイル {string} をクリックする', async ({ page }, name: string) => {
+  await treeFileLink(page, name).click();
+});
+
 // ---- コンテキストメニュー（右クリック） ----
 
 When('ユーザーがファイル {string} を右クリックする', async ({ page }, name: string) => {

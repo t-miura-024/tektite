@@ -66,6 +66,32 @@ _Avoid_: cache, temporary file, backup
 読み込み後にリモートの Note が変更されており、保存時の sha チェックで検出される状態。差分表示 + 上書き/取り込みの選択で解決する。
 _Avoid_: merge conflict, collision
 
+### 同期とキャッシュ
+
+**同期 (Sync)**:
+Cloudflare 側 (R2) の Vault と GitHub リポジトリの内容を整合させる操作。プル (GitHub → R2) とプッシュ (R2 → GitHub) の両方向を 1 回の処理で行う。
+_Avoid_: サブジェクトが曖昧な「同期処理」
+
+**定時同期**:
+Cron (1 時間おき) によって自動実行される同期。保持中の全 Vault が対象。
+_Avoid_: バックグラウンド同期, scheduled sync
+
+**明示同期**:
+Vault 画面ヘッダーのボタン操作により手動実行される同期。
+_Avoid_: 手動同期 (UI 層では manual を使わない)
+
+**初期同期**:
+Vault を初めて開いたときに実行される同期。GitHub から R2 へ全量を取り込み、完了後に Vault を表示する。
+_Avoid_: 初回取り込み, initial import
+
+**遅延キャッシュ**:
+読み取り時に R2 へ存在しない Note/Attachment を GitHub から取得し、R2 に書き戻す動作。
+_Avoid_: フォールバック (fallback は不可逆な縮退を連想させる)
+
+**同期衝突 (Sync Conflict)**:
+プル時に GitHub 側の変更と R2 側の未 push 変更が同じ Note で衝突した状態。既存の Conflict 概念を同期に拡張し、差分表示 + 上書き/取り込みで解決する。
+_Avoid_: merge conflict (既存語彙の Conflict と区別)
+
 ### ナビゲーションと操作
 
 **クイックスイッチャー**:

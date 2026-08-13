@@ -92,10 +92,6 @@ Then('空リポジトリ CTA が表示される', async ({ page }) => {
   await expect(page.getByTestId('empty-vault-cta')).toBeVisible();
 });
 
-When('ユーザーが最初のノート名に {string} と入力する', async ({ page }, name: string) => {
-  await page.getByTestId('empty-vault-cta-input').fill(name);
-});
-
 When('ユーザーが最初のノートの作成を確定する', async ({ page }) => {
   await page.getByTestId('empty-vault-cta-submit').click();
 });

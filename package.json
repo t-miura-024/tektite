@@ -4,11 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "mkdir -p dist",
-    "dev": "concurrently -k -n web,api -c auto \"vite\" \"pnpm exec wrangler pages dev dist --port 8788\"",
-    "build": "pnpm typecheck && vite build",
+    "dev": "vite",
+    "build": "vite build --mode client && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p functions/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "oxlint . --deny-warnings",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
@@ -18,7 +17,7 @@
     "visual:compare-dom": "node scripts/visual-parity/compare-dom.mjs",
     "visual:compare-regions": "node scripts/visual-parity/compare-regions.mjs",
     "test:e2e": "bddgen && playwright test",
-    "deploy": "wrangler pages deploy dist --project-name tektite"
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
@@ -28,6 +27,8 @@
     "dompurify": "^3.4.13",
     "effect": "^3.22.1",
     "highlight.js": "^11.11.1",
+    "hono": "^4.13.1",
+    "honox": "^0.1.60",
     "katex": "^0.18.1",
     "marked": "^18.0.9",
     "minisearch": "^7.2.0",
@@ -36,6 +37,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260804.1",
+    "@hono/vite-build": "^1.11.1",
+    "@hono/vite-dev-server": "^0.26.1",
     "@playwright/test": "^1.62.1",
     "@types/katex": "^0.16.8",
     "@types/node": "^26.1.2",
@@ -43,7 +46,6 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
-    "concurrently": "^10.0.4",
     "jsdom": "^30.0.1",
     "lefthook": "^2.1.10",
     "oxfmt": "^0.62.0",

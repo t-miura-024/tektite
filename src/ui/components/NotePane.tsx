@@ -22,9 +22,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 
 import { clearDraft, loadDraft, saveDraft } from '@/application/draft';
 import type { Draft } from '@/application/draft';
-import { uploadImage } from '@/application/file';
+import { uploadImage, validateEntryName } from '@/application/file';
 import { NoteSaveError, openNote, saveNoteContent } from '@/application/note';
 import type { NoteContent } from '@/application/note';
+import { resolveVaultSyncConflict } from '@/application/vault';
+import type { VaultSyncConflict } from '@/application/vault';
 import { run } from '@/composition';
 import type { EditorHandle } from '@/composition';
 import { slugify } from '@/composition';
@@ -36,7 +38,7 @@ import { NoteEditor } from '@/ui/components/NoteEditor';
 import { ReadingView } from '@/ui/components/ReadingView';
 import { fileToBase64, imageFileName } from '@/ui/image-upload';
 import { fileErrorMessage, noteErrorMessage, noteSaveErrorMessage } from '@/ui/note-error';
-import { navigate, noteRoutePath, NAVIGATE_EVENT_NAME } from '@/ui/router';
+import { navigate, noteRoutePath, NAVIGATE_EVENT_NAME, vaultRoutePath } from '@/ui/router';
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError } from '@/ui/vault-error';
 
@@ -46,6 +48,12 @@ export interface NotePaneProps {
   notePath: string;
   /** Vault 内の全ファイルパス（リーディング表示の WikiLink / Embed 解決用） */
   filePaths: readonly string[];
+  /**
+   * 未確定（未コミット）の新規ノートパス。notePath と一致したら Obsidian 式の
+   * 新規ノートとして扱う（fetch せず空のエディタを開き、タイトル編集と
+   * 自動保存が最終名での作成コミットになる）。null は通常のノート。
+   */
+  pendingPath?: string | null;
   notify: (message: string, action?: ToastAction) => void;
   onSessionExpired: () => void;
   /**
@@ -60,6 +68,25 @@ export interface NotePaneProps {
    * 新しい添付ファイルをツリー・Embed 解決へ反映するために使う。
    */
   onFileChanged?: () => void;
+  /** 未確定ノートを最終名 + 本文で 1 コミットで作成する（成功で true） */
+  onPendingCommit?: (finalName: string, content: string) => Promise<boolean>;
+  /** 未確定ノートを破棄する（Escape。何もコミットしない） */
+  onPendingDiscard?: () => void;
+  /** インラインタイトル編集からのリネーム（成功で true） */
+  onRenameNote?: (path: string, newName: string) => Promise<boolean>;
+  /**
+   * 同期完了ごとに増えるバージョン（M5）。変更されたとき、未保存（dirty）で
+   * なければノートを再読み込みして最新化する（完了条件 9: 未編集で開いている
+   * Note は同期後に最新化される。編集中の Note は上書きされない）。
+   */
+  syncVersion?: number;
+  /**
+   * 明示同期で検出された同期衝突（M5。完了条件 6）。現在のノートが衝突パスに
+   * 含まれる場合に VaultScreen から渡され、差分表示 + 上書き/取り込みで解決する。
+   */
+  syncConflict?: VaultSyncConflict | null;
+  /** 同期衝突の解決が完了したときに呼ばれる（パス。VaultScreen が一覧から除去する） */
+  onSyncConflictResolved?: (path: string) => void;
 }
 
 /**
@@ -101,12 +128,21 @@ export function NotePane({
   vaultRef,
   notePath,
   filePaths,
+  pendingPath = null,
   notify,
   onSessionExpired,
   onNoteSaved,
   onNoteContentLoaded,
   onFileChanged,
+  onPendingCommit,
+  onPendingDiscard,
+  onRenameNote,
+  syncVersion = 0,
+  syncConflict = null,
+  onSyncConflictResolved,
 }: NotePaneProps) {
+  /** 未確定の新規ノートかどうか（URL パスと pending パスが一致する間だけ true） */
+  const isPending = notePath === pendingPath;
   const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading' });
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('clean');
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -115,6 +151,16 @@ export function NotePane({
   const [editorContent, setEditorContent] = useState<string>('');
   /** 表示/編集モード（Obsidian に倣いパネル単位で保持し、ノート切替では変えない） */
   const [mode, setMode] = useState<PaneMode>('edit');
+  /**
+   * インラインタイトル編集の状態。titleName は確定済みのタイトル（未確定ノート
+   * の作成コミット名。拡張子なし）。titleEditing は編集モード中かどうか。
+   */
+  const [titleName, setTitleName] = useState('');
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const titleNameRef = useRef(titleName);
+  titleNameRef.current = titleName;
 
   // イベントコールバックから最新値を読むための ref（レンダーを跨いで安定させる）
   const handleRef = useRef<EditorHandle | null>(null);
@@ -132,6 +178,10 @@ export function NotePane({
    * （ノート切替と保存のレース対策）。
    */
   const generationRef = useRef(0);
+  /** タイトル編集入力にフォーカス中か（エディタ blur の自動保存を抑制する） */
+  const titleEditingRef = useRef(false);
+  /** タイトル編集へのクリック移動中のエディタ blur を抑制するフラグ */
+  const suppressBlurRef = useRef(false);
 
   // オブジェクトの同一性ではなく値（owner / name）で依存を比較する
   const { owner, name } = vaultRef;
@@ -149,9 +199,13 @@ export function NotePane({
    */
   const flushDraft = useCallback(
     (content: string): void => {
+      // 未確定ノート（まだ存在しないパス）は Draft の対象外（Escape で破棄される）
+      if (isPending) {
+        return;
+      }
       void run(saveDraft({ owner, name }, notePath, content)).catch(() => {});
     },
-    [owner, name, notePath],
+    [owner, name, notePath, isPending],
   );
 
   /**
@@ -282,11 +336,35 @@ export function NotePane({
 
   /**
    * 保存を実行する（明示保存・自動保存の共通経路）。
-   * 未保存の変更がある場合のみコミットする（方針: 単一ルール）。
+   * 未確定ノートは create を 1 回だけ行う（Q15:2: タイトル確定時・自動保存時に
+   * 最終名で 1 コミット）。通常ノートは未保存の変更がある場合のみコミットする。
    */
   const performSave = useCallback(
     async (content: string): Promise<void> => {
-      if (!dirtyRef.current || savingRef.current || conflictRef.current || !readyRef.current) {
+      if (savingRef.current || conflictRef.current || !readyRef.current) {
+        return;
+      }
+      if (isPending) {
+        savingRef.current = true;
+        setSaveStatus('saving');
+        const finalName = titleNameRef.current;
+        try {
+          const ok = await onPendingCommit?.(finalName, content);
+          savingRef.current = false;
+          if (ok === true) {
+            // コミット成功後は VaultScreen が pending を解除して再読込する
+            setDirty(false);
+          } else {
+            setSaveStatus('dirty');
+          }
+        } catch (error) {
+          savingRef.current = false;
+          setSaveStatus('dirty');
+          notify(fileErrorMessage(error));
+        }
+        return;
+      }
+      if (!dirtyRef.current) {
         return;
       }
       savingRef.current = true;
@@ -334,7 +412,18 @@ export function NotePane({
         setSaveStatus('dirty');
       }
     },
-    [owner, name, notePath, notify, onSessionExpired, setDirty, enterConflict, onNoteSaved],
+    [
+      isPending,
+      onPendingCommit,
+      owner,
+      name,
+      notePath,
+      notify,
+      onSessionExpired,
+      setDirty,
+      enterConflict,
+      onNoteSaved,
+    ],
   );
 
   // Cmd+S リスナーから最新の performSave を呼ぶための ref
@@ -348,11 +437,23 @@ export function NotePane({
       // 自動保存しない。通知に対する明示操作（破棄/復元）と矛盾するため
       return;
     }
+    if (suppressBlurRef.current) {
+      // タイトル編集へのクリック移動中（pointerdown で立てたフラグ）は自動保存しない
+      suppressBlurRef.current = false;
+      return;
+    }
+    if (isPending) {
+      // 未確定ノート: タイトル未編集なら Untitled.md として自動コミットする（Q18:1）
+      if (!savingRef.current && readyRef.current) {
+        void performSave(contentRef.current);
+      }
+      return;
+    }
     if (!dirtyRef.current || savingRef.current || conflictRef.current || !readyRef.current) {
       return;
     }
     void performSave(contentRef.current);
-  }, [performSave, draftNotice]);
+  }, [performSave, draftNotice, isPending]);
 
   // Cmd+S / Ctrl+S ショートカット（エディタ内外を問わず有効）
   useEffect(() => {
@@ -364,6 +465,61 @@ export function NotePane({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // 未確定ノートの Escape 破棄（Q19: 何もコミットせず閉じる）
+  useEffect(() => {
+    if (!isPending) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onPendingDiscard?.();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isPending, onPendingDiscard]);
+
+  /** インラインタイトルの編集を開始する（クリックで編集モードへ） */
+  const startTitleEdit = useCallback((): void => {
+    setTitleDraft(titleNameRef.current);
+    setTitleError(null);
+    titleEditingRef.current = true;
+    setTitleEditing(true);
+  }, []);
+
+  /** タイトル編集の確定（Enter / blur。検証して作成 or リネームへ渡す） */
+  const confirmTitleEdit = useCallback((): void => {
+    const rawName = titleDraft.trim();
+    const withExtension = rawName.toLowerCase().endsWith('.md') ? rawName : `${rawName}.md`;
+    const error = validateEntryName(withExtension, true);
+    if (error !== null) {
+      setTitleError(error);
+      return;
+    }
+    titleEditingRef.current = false;
+    setTitleEditing(false);
+    setTitleError(null);
+    if (withExtension === `${titleNameRef.current}.md`) {
+      return;
+    }
+    if (isPending) {
+      // タイトル確定 = 最終名で 1 コミット（Q15:2）。本文は現在のエディタ内容を渡す
+      titleNameRef.current = withExtension.replace(/\.md$/i, '');
+      setTitleName(titleNameRef.current);
+      void performSave(contentRef.current);
+    } else {
+      void onRenameNote?.(notePath, withExtension);
+    }
+  }, [isPending, titleDraft, notePath, performSave, onRenameNote]);
+
+  /** タイトル編集のキャンセル（Escape） */
+  const cancelTitleEdit = useCallback((): void => {
+    titleEditingRef.current = false;
+    setTitleEditing(false);
+    setTitleError(null);
   }, []);
 
   /** 競合解決: 編集中の内容を最新 sha で上書き保存する */
@@ -469,11 +625,32 @@ export function NotePane({
     setSaveStatus('clean');
     dirtyRef.current = false;
     handleRef.current = null;
+    // 未確定の新規ノート: fetch せず空の本文で即 ready（タイトル編集で作成コミット）
+    if (isPending) {
+      const defaultName = pathBaseName(notePath).replace(/\.md$/i, '');
+      shaRef.current = null;
+      contentRef.current = '';
+      setEditorContent('');
+      setTitleName(defaultName);
+      titleNameRef.current = defaultName;
+      setTitleEditing(false);
+      setTitleDraft('');
+      setTitleError(null);
+      onNoteContentLoaded?.('');
+      readyRef.current = true;
+      setLoadState({ kind: 'ready', note: { path: notePath, sha: '', content: '' } });
+      return;
+    }
     try {
       const note = await run(openNote({ owner, name }, notePath));
       shaRef.current = note.sha;
       contentRef.current = note.content;
       setEditorContent(note.content);
+      setTitleName(pathBaseName(notePath).replace(/\.md$/i, ''));
+      titleNameRef.current = pathBaseName(notePath).replace(/\.md$/i, '');
+      setTitleEditing(false);
+      setTitleDraft('');
+      setTitleError(null);
       onNoteContentLoaded?.(note.content);
       readyRef.current = true;
       setLoadState({ kind: 'ready', note });
@@ -492,7 +669,7 @@ export function NotePane({
       setLoadState({ kind: 'error', message });
       notify(message, { label: '再試行', onClick: () => void load() });
     }
-  }, [owner, name, notePath, notify, onNoteContentLoaded, onSessionExpired]);
+  }, [owner, name, notePath, isPending, notify, onNoteContentLoaded, onSessionExpired]);
 
   // ノート切替時に旧ノートの本文が 1 フレーム表示されるのを防ぐため、load() の
   // loading 状態を paint 前に反映する（useEffect だと NoteEditor が key=notePath の
@@ -501,16 +678,159 @@ export function NotePane({
     void load();
   }, [load]);
 
-  // 保存状態の表示（競合中は「競合」を最優先で出す）
-  const statusLabel =
-    conflict !== null
+  /**
+   * 同期完了後の最新化（M5。完了条件 9）:
+   * 未保存（dirty）でなければノートを再読み込みして同期後の内容へ更新する。
+   * 編集中（未保存）の Note はエディタの内容を保持し、保存時に既存の
+   * Conflict フロー（楽観ロック）で同期後の内容とマージされる。
+   */
+  const previousSyncVersion = useRef(syncVersion);
+  useEffect(() => {
+    if (syncVersion === previousSyncVersion.current) {
+      return;
+    }
+    previousSyncVersion.current = syncVersion;
+    // 初回（同期前）は何もしない。同期実行後のバージョン更新のみ処理する
+    if (syncVersion === 0) {
+      return;
+    }
+    if (dirtyRef.current || conflictRef.current || loadState.kind !== 'ready') {
+      return;
+    }
+    void load();
+  }, [syncVersion, load, loadState.kind]);
+
+  /** 同期衝突の解決中フラグ（二重送信の防止） */
+  const resolvingSyncConflictRef = useRef(false);
+
+  /**
+   * 同期衝突の解決: GitHub 側の内容を採用する（overwrite）。
+   * サーバーが R2 を GitHub の現在内容で更新するため、エディタと sha を
+   * 更新して整合させる。GitHub 側で削除されたノートは Vault ルートへ戻る。
+   */
+  const handleSyncConflictOverwrite = useCallback(async (): Promise<void> => {
+    if (syncConflict === null || resolvingSyncConflictRef.current) {
+      return;
+    }
+    resolvingSyncConflictRef.current = true;
+    const generation = generationRef.current;
+    try {
+      const sha = await run(
+        resolveVaultSyncConflict({ owner, name }, syncConflict.path, 'overwrite'),
+      );
+      if (syncConflict.remoteSha === null) {
+        // GitHub 側で削除されたノートの削除を採用 → Vault ルートへ戻る
+        onFileChanged?.();
+        navigate(vaultRoutePath({ owner, name }));
+        return;
+      }
+      if (generation !== generationRef.current) {
+        return;
+      }
+      programmaticRef.current = true;
+      handleRef.current?.setContent(syncConflict.remote);
+      programmaticRef.current = false;
+      contentRef.current = syncConflict.remote;
+      shaRef.current = sha;
+      onNoteSaved?.(syncConflict.path, syncConflict.remote);
+      await run(clearDraft({ owner, name }, notePath)).catch(() => {});
+      setDirty(false);
+      resolvingSyncConflictRef.current = false;
+      onSyncConflictResolved?.(syncConflict.path);
+    } catch (error) {
+      resolvingSyncConflictRef.current = false;
+      if (isSessionExpiredError(error)) {
+        notify('セッションの有効期限が切れました。ログインし直してください。');
+        onSessionExpired();
+        return;
+      }
+      notify(noteErrorMessage(error), {
+        label: '再試行',
+        onClick: () => void handleSyncConflictOverwrite(),
+      });
+    }
+  }, [
+    syncConflict,
+    owner,
+    name,
+    onNoteSaved,
+    notify,
+    onSessionExpired,
+    onFileChanged,
+    onSyncConflictResolved,
+    notePath,
+    setDirty,
+  ]);
+
+  /**
+   * 同期衝突の解決: ローカル側の内容を採用する（adopt）。
+   * サーバーがローカル内容を GitHub へ反映するため、エディタはそのままで
+   * sha だけ更新する（次の保存は R2 と整合する）。
+   */
+  const handleSyncConflictAdopt = useCallback(async (): Promise<void> => {
+    if (syncConflict === null || resolvingSyncConflictRef.current) {
+      return;
+    }
+    resolvingSyncConflictRef.current = true;
+    const generation = generationRef.current;
+    try {
+      const sha = await run(resolveVaultSyncConflict({ owner, name }, syncConflict.path, 'adopt'));
+      if (generation !== generationRef.current) {
+        return;
+      }
+      shaRef.current = sha;
+      onNoteSaved?.(syncConflict.path, contentRef.current);
+      await run(clearDraft({ owner, name }, notePath)).catch(() => {});
+      setDirty(false);
+      resolvingSyncConflictRef.current = false;
+      onSyncConflictResolved?.(syncConflict.path);
+    } catch (error) {
+      resolvingSyncConflictRef.current = false;
+      if (isSessionExpiredError(error)) {
+        notify('セッションの有効期限が切れました。ログインし直してください。');
+        onSessionExpired();
+        return;
+      }
+      notify(noteErrorMessage(error), {
+        label: '再試行',
+        onClick: () => void handleSyncConflictAdopt(),
+      });
+    }
+  }, [
+    syncConflict,
+    owner,
+    name,
+    onNoteSaved,
+    notify,
+    onSessionExpired,
+    onSyncConflictResolved,
+    notePath,
+    setDirty,
+  ]);
+
+  // 保存状態の表示（競合中は「競合」を最優先で出す。未確定ノートは未保存扱い）
+  // 同期衝突は編集中（未保存）でない場合のみ表示する（編集中 Note の保護:
+  // 保存時の既存 Conflict フローが同期後の内容とのマージを担う）
+  const showSyncConflict =
+    syncConflict !== null && conflict === null && !isPending && saveStatus !== 'dirty';
+  const statusLabel = isPending
+    ? saveStatus === 'saving'
+      ? '作成中…'
+      : '未保存'
+    : conflict !== null || showSyncConflict
       ? '競合'
       : saveStatus === 'saving'
         ? '保存中…'
         : saveStatus === 'dirty'
           ? '未保存'
           : '保存済み';
-  const statusKey = conflict !== null ? 'conflict' : saveStatus;
+  const statusKey = isPending
+    ? saveStatus === 'saving'
+      ? 'saving'
+      : 'dirty'
+    : conflict !== null || showSyncConflict
+      ? 'conflict'
+      : saveStatus;
 
   return (
     <div className="note-pane" data-mode={mode}>
@@ -525,7 +845,7 @@ export function NotePane({
             data-testid="mode-read-button"
             aria-pressed={mode === 'read'}
             onClick={() => setMode('read')}
-            disabled={loadState.kind !== 'ready' || conflict !== null}
+            disabled={loadState.kind !== 'ready' || conflict !== null || isPending}
           >
             表示
           </button>
@@ -550,7 +870,13 @@ export function NotePane({
           onClick={() => void performSave(contentRef.current)}
           disabled={saveStatus === 'saving' || conflict !== null || loadState.kind !== 'ready'}
         >
-          {saveStatus === 'saving' ? '保存中…' : '保存'}
+          {isPending
+            ? saveStatus === 'saving'
+              ? '作成中…'
+              : '作成'
+            : saveStatus === 'saving'
+              ? '保存中…'
+              : '保存'}
         </button>
       </header>
       {draftNotice && (
@@ -589,14 +915,66 @@ export function NotePane({
           </button>
         </div>
       )}
-      {loadState.kind === 'ready' && conflict === null && (
+      {loadState.kind === 'ready' && conflict === null && !showSyncConflict && (
         <div className="note-pane-body" data-mode={mode}>
           {/* エディタはモード切替でアンマウントせず非表示に保つ（編集中の内容と
               未保存状態を維持するため。表示モードへの切替時に blur が走り、
               既存ルールどおり自動保存される） */}
-          {mode === 'edit' && (
-            <h1 className="editor-inline-title">{pathBaseName(notePath).replace(/\.md$/i, '')}</h1>
-          )}
+          {mode === 'edit' &&
+            (titleEditing ? (
+              <div
+                className="editor-inline-title-edit"
+                onPointerDown={() => {
+                  suppressBlurRef.current = true;
+                }}
+              >
+                <input
+                  type="text"
+                  className="editor-inline-title-input"
+                  data-testid="editor-title-input"
+                  aria-label="ノートのタイトル"
+                  value={titleDraft}
+                  autoFocus
+                  onChange={(event) => {
+                    setTitleDraft(event.target.value);
+                    setTitleError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      confirmTitleEdit();
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      cancelTitleEdit();
+                    }
+                  }}
+                  onBlur={() => {
+                    if (titleEditingRef.current) {
+                      confirmTitleEdit();
+                    }
+                  }}
+                />
+                {titleError !== null && (
+                  <p className="file-tree-editor-error" role="alert">
+                    {titleError}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="editor-inline-title"
+                data-testid="editor-title"
+                onClick={startTitleEdit}
+                aria-label="タイトルを編集"
+                onPointerDown={() => {
+                  suppressBlurRef.current = true;
+                }}
+              >
+                {titleName}
+              </button>
+            ))}
           <NoteEditor
             key={notePath}
             notePath={notePath}
@@ -628,6 +1006,20 @@ export function NotePane({
           saving={saveStatus === 'saving'}
           onOverwrite={() => void handleOverwrite()}
           onAdopt={() => void handleAdopt()}
+        />
+      )}
+      {showSyncConflict && syncConflict !== null && (
+        <ConflictPanel
+          variant="sync"
+          local={syncConflict.local}
+          remote={{
+            path: syncConflict.path,
+            content: syncConflict.remote,
+            sha: syncConflict.remoteSha,
+          }}
+          saving={resolvingSyncConflictRef.current}
+          onOverwrite={() => void handleSyncConflictOverwrite()}
+          onAdopt={() => void handleSyncConflictAdopt()}
         />
       )}
     </div>

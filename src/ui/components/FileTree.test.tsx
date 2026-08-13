@@ -1,5 +1,5 @@
 /**
- * ファイルツリーのファイル操作 UI テスト（M5: 作成・リネーム・移動・削除）。
+ * ファイルツリーのファイル操作 UI テスト（M5: 作成・リネーム・移動・複製・削除）。
  *
  * @vitest-environment jsdom
  */
@@ -38,6 +38,7 @@ interface Rendered {
   callbacks: {
     onCreateNote: ReturnType<typeof vi.fn>;
     onCreateDirectory: ReturnType<typeof vi.fn>;
+    onDuplicate: ReturnType<typeof vi.fn>;
     onRename: ReturnType<typeof vi.fn>;
     onMove: ReturnType<typeof vi.fn>;
     onDelete: ReturnType<typeof vi.fn>;
@@ -50,6 +51,7 @@ async function renderTree(
   const callbacks = {
     onCreateNote: vi.fn(),
     onCreateDirectory: vi.fn(),
+    onDuplicate: vi.fn(),
     onRename: vi.fn(),
     onMove: vi.fn(),
     onDelete: vi.fn(),
@@ -67,6 +69,7 @@ async function renderTree(
         onToggleDirectory={vi.fn()}
         onCreateNote={callbacks.onCreateNote}
         onCreateDirectory={callbacks.onCreateDirectory}
+        onDuplicate={callbacks.onDuplicate}
         onRename={callbacks.onRename}
         onMove={callbacks.onMove}
         onDelete={callbacks.onDelete}
@@ -93,46 +96,74 @@ function findByTestId(container: HTMLElement, id: string): HTMLElement {
   return element as HTMLElement;
 }
 
+/** 指定した名前のツリー項目を右クリックしてメニューを開く */
+async function openContextMenu(container: HTMLElement, name: string): Promise<void> {
+  const item = [...container.querySelectorAll('a.file-tree-link, button.file-tree-toggle')].find(
+    (element) => element.textContent?.includes(name),
+  );
+  if (!item) {
+    throw new Error(`ツリー項目「${name}」が見つかりません`);
+  }
+  await act(async () => {
+    item.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  });
+}
+
 afterEach(() => {
   document.body.innerHTML = '';
 });
 
 describe('FileTree のファイル操作', () => {
-  it('新規ノート: フォームを開いて名前を確定すると onCreateNote が呼ばれる', async () => {
+  it('新規ノート: ツールバーのボタンで onCreateNote("") が呼ばれる（Obsidian 式）', async () => {
     const { container, root, callbacks } = await renderTree();
 
     await act(async () => {
       findByTestId(container, 'file-create-note-button').click();
     });
-    const input = findByTestId(container, 'file-tree-editor-input') as HTMLInputElement;
-    await typeValue(input, 'memo.md');
-    await act(async () => {
-      findByTestId(container, 'file-tree-editor-submit').click();
-    });
 
-    expect(callbacks.onCreateNote).toHaveBeenCalledWith('memo.md');
+    expect(callbacks.onCreateNote).toHaveBeenCalledWith('');
     expect(callbacks.onCreateDirectory).not.toHaveBeenCalled();
     root.unmount();
   });
 
-  it('新規ノート: .md でない名前は検証エラーになり送信されない', async () => {
+  it('新規ノート: フォルダのコンテキストメニューで onCreateNote(フォルダパス) が呼ばれる', async () => {
     const { container, root, callbacks } = await renderTree();
 
+    await openContextMenu(container, 'daily');
     await act(async () => {
-      findByTestId(container, 'file-create-note-button').click();
-    });
-    const input = findByTestId(container, 'file-tree-editor-input') as HTMLInputElement;
-    await typeValue(input, 'memo');
-    await act(async () => {
-      findByTestId(container, 'file-tree-editor-submit').click();
+      findByTestId(container, 'file-menu-create-note').click();
     });
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('.md');
+    expect(callbacks.onCreateNote).toHaveBeenCalledWith('daily');
+    root.unmount();
+  });
+
+  it('新規ノート: ノートのコンテキストメニューには新規作成項目が出ない（Q1:1 出し分け）', async () => {
+    const { container, root, callbacks } = await renderTree();
+
+    await openContextMenu(container, 'a.md');
+    expect(container.querySelector('[data-testid="file-menu-create-note"]')).toBeNull();
+    expect(container.querySelector('[data-testid="file-menu-create-directory"]')).toBeNull();
     expect(callbacks.onCreateNote).not.toHaveBeenCalled();
     root.unmount();
   });
 
-  it('新規フォルダー: 名前を確定すると onCreateDirectory が呼ばれる', async () => {
+  it('空き領域の右クリック: 新規ノート / 新規フォルダ（ルート直下）のメニューが開く', async () => {
+    const { container, root, callbacks } = await renderTree();
+
+    await act(async () => {
+      const region = container.querySelector('.file-tree-region');
+      region?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      findByTestId(container, 'file-menu-create-note').click();
+    });
+
+    expect(callbacks.onCreateNote).toHaveBeenCalledWith('');
+    root.unmount();
+  });
+
+  it('新規フォルダー: ツールバーのボタンで入力が開き、確定すると onCreateDirectory("", name) が呼ばれる', async () => {
     const { container, root, callbacks } = await renderTree();
 
     await act(async () => {
@@ -144,22 +175,67 @@ describe('FileTree のファイル操作', () => {
       findByTestId(container, 'file-tree-editor-submit').click();
     });
 
-    expect(callbacks.onCreateDirectory).toHaveBeenCalledWith('archive');
+    expect(callbacks.onCreateDirectory).toHaveBeenCalledWith('', 'archive');
     root.unmount();
   });
 
-  it('リネーム: コンテキストメニューからインライン入力を開き、新しい名前で onRename が呼ばれる', async () => {
+  it('新規フォルダー: フォルダのコンテキストメニューで対象フォルダ直下に作成する', async () => {
+    const { container, root, callbacks } = await renderTree({
+      expandedPaths: new Set(['', 'daily']),
+    });
+
+    await openContextMenu(container, 'daily');
+    await act(async () => {
+      findByTestId(container, 'file-menu-create-directory').click();
+    });
+    const input = findByTestId(container, 'file-tree-editor-input') as HTMLInputElement;
+    await typeValue(input, 'archive');
+    await act(async () => {
+      findByTestId(container, 'file-tree-editor-submit').click();
+    });
+
+    expect(callbacks.onCreateDirectory).toHaveBeenCalledWith('daily', 'archive');
+    root.unmount();
+  });
+
+  it('新規フォルダー: 閉じたフォルダのメニューから作成すると自動展開される（Q8:1）', async () => {
+    const onToggleDirectory = vi.fn();
+    const { container, root, callbacks } = await renderTree({
+      expandedPaths: new Set(['']),
+      onToggleDirectory,
+    });
+
+    await openContextMenu(container, 'daily');
+    await act(async () => {
+      findByTestId(container, 'file-menu-create-directory').click();
+    });
+
+    expect(onToggleDirectory).toHaveBeenCalledWith('daily');
+    expect(callbacks.onCreateDirectory).not.toHaveBeenCalled();
+    root.unmount();
+  });
+
+  it('複製: コンテキストメニューから onDuplicate が呼ばれる（フォルダ・ノート共通項目）', async () => {
     const { container, root, callbacks } = await renderTree();
 
-    const fileLink = [...container.querySelectorAll('a.file-tree-link')].find(
-      (link) => link.textContent === 'a.md',
-    );
-    if (!fileLink) {
-      throw new Error('a.md リンクが見つかりません');
-    }
+    await openContextMenu(container, 'a.md');
     await act(async () => {
-      fileLink.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      findByTestId(container, 'file-menu-duplicate').click();
     });
+    expect(callbacks.onDuplicate).toHaveBeenCalledWith('a.md', 'file');
+
+    await openContextMenu(container, 'daily');
+    await act(async () => {
+      findByTestId(container, 'file-menu-duplicate').click();
+    });
+    expect(callbacks.onDuplicate).toHaveBeenCalledWith('daily', 'directory');
+    root.unmount();
+  });
+
+  it('リネーム: コンテキストメニュー「名前を変更」からインライン入力を開き、onRename が呼ばれる', async () => {
+    const { container, root, callbacks } = await renderTree();
+
+    await openContextMenu(container, 'a.md');
     await act(async () => {
       findByTestId(container, 'file-menu-rename').click();
     });
@@ -180,15 +256,7 @@ describe('FileTree のファイル操作', () => {
   it('削除: 確認ダイアログの確定を挟まないと onDelete は呼ばれない', async () => {
     const { container, root, callbacks } = await renderTree();
 
-    const fileLink = [...container.querySelectorAll('a.file-tree-link')].find(
-      (link) => link.textContent === 'a.md',
-    );
-    if (!fileLink) {
-      throw new Error('a.md リンクが見つかりません');
-    }
-    await act(async () => {
-      fileLink.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
+    await openContextMenu(container, 'a.md');
     await act(async () => {
       findByTestId(container, 'file-menu-delete').click();
     });
@@ -204,9 +272,7 @@ describe('FileTree のファイル操作', () => {
     expect(callbacks.onDelete).not.toHaveBeenCalled();
 
     // 改めて開いて確定すると呼ばれる
-    await act(async () => {
-      fileLink.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
+    await openContextMenu(container, 'a.md');
     await act(async () => {
       findByTestId(container, 'file-menu-delete').click();
     });
@@ -220,15 +286,7 @@ describe('FileTree のファイル操作', () => {
   it('移動: 移動先ダイアログにルートとディレクトリが並び、ディレクトリ自身の配下は無効化される', async () => {
     const { container, root, callbacks } = await renderTree();
 
-    const dirToggle = [...container.querySelectorAll('button.file-tree-toggle')].find((button) =>
-      button.textContent?.includes('daily'),
-    );
-    if (!dirToggle) {
-      throw new Error('daily トグルが見つかりません');
-    }
-    await act(async () => {
-      dirToggle.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
+    await openContextMenu(container, 'daily');
     await act(async () => {
       findByTestId(container, 'file-menu-move').click();
     });
@@ -250,15 +308,7 @@ describe('FileTree のファイル操作', () => {
   it('ファイルの移動は現在の親ディレクトリ（ルート含む）を選べない', async () => {
     const { container, root, callbacks } = await renderTree();
 
-    const fileLink = [...container.querySelectorAll('a.file-tree-link')].find(
-      (link) => link.textContent === 'logo.png',
-    );
-    if (!fileLink) {
-      throw new Error('logo.png リンクが見つかりません');
-    }
-    await act(async () => {
-      fileLink.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
+    await openContextMenu(container, 'logo.png');
     await act(async () => {
       findByTestId(container, 'file-menu-move').click();
     });
@@ -276,6 +326,49 @@ describe('FileTree のファイル操作', () => {
       findByTestId(container, 'move-dialog-confirm').click();
     });
     expect(callbacks.onMove).toHaveBeenCalledWith('logo.png', 'file', 'daily');
+    root.unmount();
+  });
+
+  it('コンテキストメニュー: ↑↓ で項目移動、Enter で実行、Escape で閉じる（Q10:1）', async () => {
+    const { container, root } = await renderTree();
+
+    await openContextMenu(container, 'a.md');
+    const menu = findByTestId(container, 'file-context-menu');
+
+    // 最初の項目（複製を作成）にフォーカスされている
+    const items = () => container.querySelectorAll('[role="menuitem"]');
+    expect(items().length).toBe(4);
+    expect(document.activeElement?.textContent).toBe('複製を作成');
+
+    // ↓ で 2 番目（名前を変更）
+    await act(async () => {
+      menu.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(document.activeElement?.textContent).toBe('名前を変更');
+
+    // Enter で実行（名前を変更 → インライン入力が開く）
+    await act(async () => {
+      menu.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(container.querySelector('[data-testid="file-rename-input"]')).not.toBeNull();
+
+    // リネーム入力を Escape で閉じて、再びメニューを開く
+    await act(async () => {
+      findByTestId(container, 'file-rename-input').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+    });
+    await openContextMenu(container, 'a.md');
+    await act(async () => {
+      findByTestId(container, 'file-context-menu').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(container.querySelector('[data-testid="file-context-menu"]')).toBeNull();
     root.unmount();
   });
 });

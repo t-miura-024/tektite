@@ -29,7 +29,12 @@ import type {
   NoteSaveResult,
 } from '@/application/note';
 import { VaultFetchError, VaultGateway } from '@/application/vault';
-import type { VaultTreeData } from '@/application/vault';
+import type {
+  VaultSyncConflict,
+  VaultSyncResult,
+  VaultSyncStatus,
+  VaultTreeData,
+} from '@/application/vault';
 import type { TreeEntry } from '@/domain/tree';
 import type { Vault, VaultRef } from '@/domain/vault';
 
@@ -77,10 +82,17 @@ interface SaveErrorConstructor<E extends Error> {
 function requestJson<E extends Error>(
   path: string,
   ErrorCtor: FetchErrorConstructor<E>,
+  init: { method?: 'GET' | 'POST' } = {},
 ): Effect.Effect<unknown, E> {
   return Effect.gen(function* () {
     const response = yield* Effect.tryPromise({
-      try: () => fetch(path),
+      try: () =>
+        fetch(
+          path,
+          init.method === 'POST'
+            ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+            : undefined,
+        ),
       catch: (error) =>
         new ErrorCtor('network', 'サーバーと通信できませんでした。', { cause: error }),
     });
@@ -285,6 +297,67 @@ function parseCommitResultBody(body: unknown): CommitResult | null {
   return { owner, name, branch, commitSha };
 }
 
+/** /api/vaults/:owner/:repo/sync の応答を VaultSyncResult にパースする（形式不正は null） */
+function parseSyncBody(body: unknown): VaultSyncResult | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+  const owner = readString(body.owner);
+  const name = readString(body.name);
+  if (
+    !owner ||
+    !name ||
+    (body.status !== 'initialized' && body.status !== 'already_synced' && body.status !== 'synced')
+  ) {
+    return null;
+  }
+  let conflicts: VaultSyncConflict[] | undefined;
+  if (Array.isArray(body.conflicts)) {
+    conflicts = [];
+    for (const item of body.conflicts) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      const path = readString(item.path);
+      if (!path || typeof item.local !== 'string' || typeof item.remote !== 'string') {
+        continue;
+      }
+      const remoteSha = readString(item.remoteSha);
+      conflicts.push({ path, local: item.local, remote: item.remote, remoteSha });
+    }
+  }
+  return {
+    owner,
+    name,
+    status: body.status,
+    defaultBranch: readString(body.defaultBranch) ?? 'main',
+    notes: typeof body.notes === 'number' ? body.notes : 0,
+    ...(typeof body.syncedAt === 'string' ? { syncedAt: body.syncedAt } : {}),
+    ...(typeof body.pulled === 'number' ? { pulled: body.pulled } : {}),
+    ...(typeof body.pushed === 'number' ? { pushed: body.pushed } : {}),
+    ...(conflicts !== undefined ? { conflicts } : {}),
+  };
+}
+
+/** /api/vaults/:owner/:repo/sync（GET）の応答を VaultSyncStatus にパースする */
+function parseSyncStatusBody(body: unknown): VaultSyncStatus | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+  const owner = readString(body.owner);
+  const name = readString(body.name);
+  if (!owner || !name) {
+    return null;
+  }
+  return {
+    owner,
+    name,
+    syncedAt: readString(body.syncedAt),
+    lastSyncError: readString(body.lastSyncError),
+    lastFailedAt: readString(body.lastFailedAt),
+  };
+}
+
 const invalidVaultResponse = () =>
   Effect.fail(new VaultFetchError('server', 'サーバー応答の形式が不正です。'));
 
@@ -315,6 +388,112 @@ export const VaultGatewayLive = Layer.succeed(VaultGateway, {
         return yield* invalidVaultResponse();
       }
       return data;
+    }),
+
+  initializeSync: (ref: VaultRef) =>
+    Effect.gen(function* () {
+      const path = `/api/vaults/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/sync`;
+      const body = yield* requestJson(path, VaultFetchError, { method: 'POST' });
+      const result = parseSyncBody(body);
+      if (result === null) {
+        return yield* invalidVaultResponse();
+      }
+      return result;
+    }),
+
+  syncVault: (ref: VaultRef) =>
+    Effect.gen(function* () {
+      // 明示同期: body の action: 'sync' で差分同期（プル + プッシュ）を実行させる
+      const path = `/api/vaults/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/sync`;
+      const response = yield* Effect.tryPromise({
+        try: () =>
+          fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'sync' }),
+          }),
+        catch: (error) =>
+          new VaultFetchError('network', 'サーバーと通信できませんでした。', { cause: error }),
+      });
+      if (response.status === 401) {
+        return yield* Effect.fail(
+          new VaultFetchError('unauthenticated', 'セッションの有効期限が切れました。'),
+        );
+      }
+      if (response.status === 429) {
+        return yield* Effect.fail(
+          new VaultFetchError('rate_limited', 'GitHub API のレートリミットに達しました。'),
+        );
+      }
+      if (!response.ok) {
+        return yield* Effect.fail(
+          new VaultFetchError('server', `同期に失敗しました（HTTP ${response.status}）。`),
+        );
+      }
+      const body = yield* Effect.tryPromise({
+        try: () => response.json(),
+        catch: (error) =>
+          new VaultFetchError('server', 'サーバー応答の形式が不正です。', { cause: error }),
+      });
+      const result = parseSyncBody(body);
+      if (result === null) {
+        return yield* invalidVaultResponse();
+      }
+      return result;
+    }),
+
+  fetchSyncStatus: (ref: VaultRef) =>
+    Effect.gen(function* () {
+      const path = `/api/vaults/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/sync`;
+      const body = yield* requestJson(path, VaultFetchError);
+      const result = parseSyncStatusBody(body);
+      if (result === null) {
+        return yield* invalidVaultResponse();
+      }
+      return result;
+    }),
+
+  resolveSyncConflict: (ref: VaultRef, notePath: string, resolution: 'overwrite' | 'adopt') =>
+    Effect.gen(function* () {
+      const path = `/api/vaults/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/sync/resolve`;
+      const response = yield* Effect.tryPromise({
+        try: () =>
+          fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: notePath, resolution }),
+          }),
+        catch: (error) =>
+          new VaultFetchError('network', 'サーバーと通信できませんでした。', { cause: error }),
+      });
+      if (response.status === 401) {
+        return yield* Effect.fail(
+          new VaultFetchError('unauthenticated', 'セッションの有効期限が切れました。'),
+        );
+      }
+      if (response.status === 429) {
+        return yield* Effect.fail(
+          new VaultFetchError('rate_limited', 'GitHub API のレートリミットに達しました。'),
+        );
+      }
+      if (!response.ok) {
+        return yield* Effect.fail(
+          new VaultFetchError(
+            'server',
+            `同期衝突を解決できませんでした（HTTP ${response.status}）。`,
+          ),
+        );
+      }
+      const body = yield* Effect.tryPromise({
+        try: () => response.json(),
+        catch: (error) =>
+          new VaultFetchError('server', 'サーバー応答の形式が不正です。', { cause: error }),
+      });
+      const sha = isRecord(body) ? readString(body.sha) : null;
+      if (sha === null) {
+        return yield* invalidVaultResponse();
+      }
+      return sha;
     }),
 });
 
