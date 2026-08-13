@@ -14,7 +14,7 @@
   "kv_namespaces": [
     {
       "binding": "TOKEN_KV",
-      "id": "${TEKTITE_KV_NAMESPACE_ID}",
+      "id": "3e10143e402c4395944639912f527677",
     },
   ],
   "r2_buckets": [
