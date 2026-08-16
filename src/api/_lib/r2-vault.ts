@@ -311,6 +311,39 @@ export async function listCachedNotes(
 }
 
 /**
+ * 同期済み Vault の既存ノート path の集合を返す（合成キーを読まず path だけ列挙）。
+ *
+ * 同期の差分判定で「R2 にまだ取り込まれていないノート」を効率よく見つけるために
+ * 使う（本文を読みたければ個別に readCachedNote する）。「R2 に無い = 削除」という
+ * 推論には使わない（削除は tombstone のみを根拠にする。2026-08-16 の事故の教訓）。
+ */
+export async function listCachedNotePaths(
+  bucket: R2Bucket,
+  owner: string,
+  repo: string,
+): Promise<ReadonlySet<string>> {
+  const prefix = `vaults/${owner}/${repo}/notes/`;
+  const paths = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- R2 list のページング（truncated 時のみ続行）のため
+    const listed = await bucket.list({
+      prefix,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const object of listed.objects) {
+      const notePath = object.key.slice(prefix.length);
+      if (notePath.length > 0) {
+        paths.add(notePath);
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- R2 list のページング（truncated 時のみ続行）のため
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor !== undefined);
+  return paths;
+}
+
+/**
  * 同期済み Vault の全添付を R2 から列挙する（M5 の同期 push 用）。
  * 本文は body（ArrayBuffer）で返し、破損・形式不正は 1 件ずつスキップする。
  */

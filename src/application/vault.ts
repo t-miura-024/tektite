@@ -45,8 +45,8 @@ export interface VaultTreeData {
 export interface VaultSyncResult {
   readonly owner: string;
   readonly name: string;
-  /** initialized: 初回同期が実行された / already_synced: 既に同期済み / synced: 差分同期 */
-  readonly status: 'initialized' | 'already_synced' | 'synced';
+  /** initialized: 初回同期が完了 / already_synced: 既に同期済み / synced: 差分同期完了 / syncing: まだ未処理のノートが残っている（再呼び出しで継続） */
+  readonly status: 'initialized' | 'already_synced' | 'synced' | 'syncing';
   readonly defaultBranch: string;
   /** 取り込んだノート数（already_synced は 0） */
   readonly notes: number;
@@ -58,6 +58,8 @@ export interface VaultSyncResult {
   readonly pushed?: number;
   /** 検出した同期衝突（status: 'synced' のみ。解決は resolveSyncConflict） */
   readonly conflicts?: readonly VaultSyncConflict[];
+  /** 残っている未処理の同期対象数（status: 'syncing' のみ。0 になるまで再呼び出し） */
+  readonly remaining?: number;
 }
 
 /** 同期衝突 1 件（プル時に GitHub 側の変更と R2 側のローカル保存が重なった Note） */
@@ -126,16 +128,35 @@ export const openVault = (ref: VaultRef): Effect.Effect<VaultTree, VaultFetchErr
   });
 
 /**
+ * 同期チャンクの最大反復回数。サーバーが 1 リクエストで最大 40 件ずつ処理する
+ * ため、4000 ノート規模の Vault まで 1 回のユースケース呼び出しで完了できる。
+ * 超える（異常に syncing が続く）場合は最後の結果を返して打ち切る（防衛線）。
+ */
+const MAX_SYNC_ITERATIONS = 100;
+
+/**
  * Vault の初期同期を実行する（GitHub → R2 の全量取り込み）。
  * R2 に同期済みメタがある場合はサーバーが即座に完了を返すため、
  * Vault を開くたびに呼んでも GitHub API は消費しない（初回のみ消費）。
+ *
+ * 大量ノートの Vault ではサーバーが 1 リクエスト 40 件ずつしか取り込めない
+ * （Workers Free のサブリクエスト制限への対応）ため、status が 'syncing' の間
+ * 同じ呼び出しを繰り返す（サーバー側の処理は冪等で、既取得分は自動スキップされる）。
  */
 export const initializeVault = (
   ref: VaultRef,
 ): Effect.Effect<VaultSyncResult, VaultFetchError, VaultGateway> =>
   Effect.gen(function* () {
     const gateway = yield* VaultGateway;
-    return yield* gateway.initializeSync(ref);
+    let result = yield* gateway.initializeSync(ref);
+    for (
+      let attempt = 0;
+      attempt < MAX_SYNC_ITERATIONS && result.status === 'syncing';
+      attempt += 1
+    ) {
+      result = yield* gateway.initializeSync(ref);
+    }
+    return result;
   });
 
 /**
@@ -143,13 +164,24 @@ export const initializeVault = (
  * ツリー sha 比較でプルし、未反映の変更を 1 コミットに束ねてプッシュする。
  * 同期衝突が検出された場合は結果の conflicts に含まれ、UI が
  * resolveSyncConflict で解決する。
+ *
+ * 大量の差分がある Vault ではサーバーが 1 リクエスト 40 件ずつしか処理できない
+ * ため、status が 'syncing' の間同じ呼び出しを繰り返す（冪等）。
  */
 export const syncVault = (
   ref: VaultRef,
 ): Effect.Effect<VaultSyncResult, VaultFetchError, VaultGateway> =>
   Effect.gen(function* () {
     const gateway = yield* VaultGateway;
-    return yield* gateway.syncVault(ref);
+    let result = yield* gateway.syncVault(ref);
+    for (
+      let attempt = 0;
+      attempt < MAX_SYNC_ITERATIONS && result.status === 'syncing';
+      attempt += 1
+    ) {
+      result = yield* gateway.syncVault(ref);
+    }
+    return result;
   });
 
 /** 同期状態（最終同期時刻・失敗マーク）を取得する（M5。完了条件 10） */

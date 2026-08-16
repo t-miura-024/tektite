@@ -43,6 +43,7 @@ import {
   resolveProxyConfig,
 } from '@/api/_lib/github-proxy';
 import {
+  listCachedNotePaths,
   readVaultMeta,
   writeCachedNote,
   writeVaultMeta,
@@ -139,6 +140,17 @@ async function fetchBlobContent(
 /** Markdown blob 並列取得の同時実行上限（GitHub のレートリミット消費を抑える） */
 const BLOB_FETCH_CONCURRENCY = 8;
 
+/**
+ * 1 リクエストで取得する blob 数の上限（同期のチャンク化。2026-08-16 の事故後）。
+ *
+ * Cloudflare Workers Free プランの外部 fetch サブリクエスト制限（50 件/リクエスト）
+ * を超過しないための安全値。1 リクエストは「ツリー取得 + repo 取得 + blob 取得」を
+ * 行うため、blob 側を 40 件に抑えても合計 42 件程度になる。大量のノートがある
+ * Vault は 1 リクエストで全量を取得せず、レスポンスの `remaining` を見て
+ * クライアントが複数リクエストに分割して取得する。
+ */
+const SYNC_FETCH_LIMIT = 40;
+
 export async function handleVaultSyncPost(context: RouteContext): Promise<Response> {
   const { env, request, params } = context;
   const owner = paramToString(params.owner);
@@ -229,12 +241,13 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
       {
         owner,
         name: repoName,
-        status: 'synced',
+        status: outcome.result.status,
         defaultBranch: existingMeta.defaultBranch,
         syncedAt: outcome.result.syncedAt,
         pulled: outcome.result.pulled,
         pushed: outcome.result.pushed,
         conflicts: outcome.result.conflicts,
+        remaining: outcome.result.remaining,
       },
       { headers: { 'Cache-Control': 'no-store' } },
     );
@@ -319,14 +332,21 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
     }
   }
 
-  // 4) Markdown blob を同時 8 件ずつ取得して R2 へ書き込む。
+  // 4) Markdown blob をチャンク取得して R2 へ書き込む（1 リクエスト最大
+  //    SYNC_FETCH_LIMIT 件。Workers Free の外部 fetch 50 件制限を守るための
+  //    チャンク化。メタが無いうちは読み取りが GitHub 直行のままなので、既に
+  //    取得済みのノートは R2 に存在し、次回の呼び出しで自然にスキップされる）。
   //    取得に失敗したノートがある場合は初期同期を失敗させる。部分成功のまま
   //    完了マーカー（meta）を書くと、R2 が不完全な状態で「R2 が正」になり、
   //    その後の同期が誤動作する（2026-08-16 の大量削除事故の再発防止）。
-  //    失敗時は meta が無いため、次回の初期同期で全量がやり直される
+  //    失敗時は meta が無いため、次回の初期同期で未取得分がやり直される
+  const existingPaths = await listCachedNotePaths(bucket, owner, repoName);
+  const pendingBlobs = noteBlobs.filter(({ path }) => !existingPaths.has(path));
+  const fetchTargets = pendingBlobs.slice(0, SYNC_FETCH_LIMIT);
+
   let notes = 0;
-  for (let offset = 0; offset < noteBlobs.length; offset += BLOB_FETCH_CONCURRENCY) {
-    const chunk = noteBlobs.slice(offset, offset + BLOB_FETCH_CONCURRENCY);
+  for (let offset = 0; offset < fetchTargets.length; offset += BLOB_FETCH_CONCURRENCY) {
+    const chunk = fetchTargets.slice(offset, offset + BLOB_FETCH_CONCURRENCY);
     // oxlint-disable-next-line no-await-in-loop -- 同時実行数を 8 に制限する意図的なチャンク処理
     const chunkResults = await Promise.all(
       chunk.map(async ({ path, sha }) => {
@@ -351,6 +371,17 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
       });
       notes += 1;
     }
+  }
+
+  // 4') 未取得のノートが残っている場合は完了マーカーとツリーを書かずに中断し、
+  //     残件数を返してクライアントに続きを促す（チャンク化。冪等なため、
+  //     クライアントが同一リクエストを繰り返すだけで残りが消化される）
+  const remaining = pendingBlobs.length - fetchTargets.length;
+  if (remaining > 0) {
+    return Response.json(
+      { owner, name: repoName, status: 'syncing', defaultBranch, remaining },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 
   // 5) ツリー + 同期完了マーカーを書き込む（M5 は meta.treeSha で差分を検出する）

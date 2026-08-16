@@ -54,6 +54,7 @@ import {
   clearVaultDeleted,
   deleteCachedNote,
   isVaultDeleted,
+  listCachedNotePaths,
   listCachedNotes,
   listCachedRaws,
   listVaultDeleted,
@@ -124,7 +125,8 @@ export interface SyncConflict {
 
 /** 同期の成功結果 */
 export interface SyncResult {
-  readonly status: 'synced';
+  /** synced: 差分同期が完了 / syncing: 未処理の差分が残っている（チャンク継続） */
+  readonly status: 'synced' | 'syncing';
   readonly syncedAt: string;
   /** プルで R2 に反映したノート数（追加・更新・削除の合計） */
   readonly pulled: number;
@@ -132,6 +134,8 @@ export interface SyncResult {
   readonly pushed: number;
   /** 検出した同期衝突（明示同期のみ返す。定時同期は中断する） */
   readonly conflicts: readonly SyncConflict[];
+  /** status: 'syncing' のとき、残っている未処理のプル対象数 */
+  readonly remaining?: number;
 }
 
 export type SyncOutcome =
@@ -185,6 +189,17 @@ const BLOB_FETCH_CONCURRENCY = 8;
 
 /** 1 回の同期 push で許容する削除件数の上限（削除ガードの安全弁） */
 const MAX_SYNC_DELETIONS = 100;
+
+/**
+ * 1 リクエストで取得する blob 数の上限（同期プルのチャンク化。2026-08-16 の事故後）。
+ *
+ * Cloudflare Workers Free プランの外部 fetch サブリクエスト制限（50 件/リクエスト）
+ * を超過しないための安全値。1 リクエストは「ツリー取得 + blob 取得 + 衝突 remote 取得」
+ * を行うため、blob 側を 40 件に抑えて合計 50 件未満に収める。大量の差分がある
+ * Vault は 1 リクエストでは処理しきらず、`status: 'syncing'` を返して呼び出し側が
+ * 再実行する（冪等なため再実行で自然に続きが消化される）。
+ */
+const SYNC_FETCH_LIMIT = 40;
 
 /** GitHub ツリー取得（GitHub 到達不能・レートリミットはエラー応答を返す） */
 async function fetchGithubTree(
@@ -314,66 +329,107 @@ export async function syncVault(
   let treeChanged = treeSha !== meta.treeSha;
 
   if (treeChanged) {
-    // 2) プル: GitHub 側の追加・変更を R2 へ反映し、衝突を検出する
+    // 2) プル: GitHub 側の追加・変更を R2 へ反映し、衝突を検出する。
+    //    差分判定（R2 アクセスのみ）と blob 取得（外部 fetch）を分離し、
+    //    外部 fetch を 1 リクエスト SYNC_FETCH_LIMIT 件までに抑える（チャンク化。
+    //    Workers Free のサブリクエスト 50 件制限を守るため）。冪等なため、
+    //    リクエストを再実行するだけで未処理分が続きから消化される
+    const existingPaths = await listCachedNotePaths(bucket, owner, repoName);
     const noteBlobs = [...ghMap.entries()].filter(
       ([path, ghSha]) => isNotePath(path) && ghSha.length > 0,
     );
-    for (let offset = 0; offset < noteBlobs.length; offset += BLOB_FETCH_CONCURRENCY) {
-      const chunk = noteBlobs.slice(offset, offset + BLOB_FETCH_CONCURRENCY);
+
+    // 2a) 差分を分類する（外部 fetch なし）
+    const fetchTargets: { path: string; ghSha: string }[] = [];
+    const localConflicts: { path: string; local: string; ghSha: string }[] = [];
+    for (const [path, ghSha] of noteBlobs) {
+      if (!existingPaths.has(path)) {
+        // R2 に無いノート。ローカル削除（tombstone）のあるパスは取得しない
+        // （削除の巻き戻り防止。tombstone が無ければ GitHub 側の新規追加）
+        // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順に分類するため
+        if (await isVaultDeleted(bucket, owner, repoName, path)) {
+          continue;
+        }
+        fetchTargets.push({ path, ghSha });
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順に分類するため
+      const cached = await readCachedNote(bucket, owner, repoName, path);
+      if (cached === null) {
+        // existingPaths に存在するが破損等で読めない → 取得し直す（防衛線）
+        fetchTargets.push({ path, ghSha });
+        continue;
+      }
+      // 同一判定は sha 文字列比較ではなく本文の git blob sha との照合で行う
+      // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順に同一判定するため
+      if (cached.sha === ghSha || (await gitBlobShaText(cached.content)) === ghSha) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順にローカル保存判定するため
+      if (await isLocalSavedSha(cached.content, cached.sha)) {
+        // R2 側にローカル保存（未 push）の変更がある → 同期衝突
+        localConflicts.push({ path, local: cached.content, ghSha });
+        continue;
+      }
+      // R2 は古い GitHub 内容（未編集）→ GitHub 側の変更を取り込む
+      fetchTargets.push({ path, ghSha });
+    }
+
+    // 2b) blob 取得（外部 fetch）。衝突の remote 内容取得分を差し引いた
+    //     バジェットで取得し、残りは次回の再実行で消化する
+    const fetchBudget = Math.max(0, SYNC_FETCH_LIMIT - localConflicts.length);
+    const fetchChunk = fetchTargets.slice(0, fetchBudget);
+    for (let offset = 0; offset < fetchChunk.length; offset += BLOB_FETCH_CONCURRENCY) {
+      const chunk = fetchChunk.slice(offset, offset + BLOB_FETCH_CONCURRENCY);
       // oxlint-disable-next-line no-await-in-loop -- 同時実行数を 8 に制限する意図的なチャンク処理
       const chunkResults = await Promise.all(
-        chunk.map(async ([path, ghSha]) => {
-          const cached = await readCachedNote(bucket, owner, repoName, path);
-          if (cached === null) {
-            // ローカル削除（tombstone）のあるパスは fetch しない（削除の巻き戻り
-            // 防止。R2 とツリーキャッシュの両方から消えたパスは「ローカル削除」
-            // か「GitHub 側新規追加」のどちらかの可能性があるが、tombstone で
-            // 区別できる: あればローカル削除、なければ GitHub 側新規追加）
-            if (await isVaultDeleted(bucket, owner, repoName, path)) {
-              return { path, ghSha, op: 'skip' as const, content: null };
-            }
-            const content = await fetchBlobContent(baseUrl, token, owner, repoName, ghSha);
-            return { path, ghSha, op: 'fetch' as const, content };
-          }
-          // 同一判定は sha 文字列比較ではなく本文の git blob sha との照合で行う
-          if (cached.sha === ghSha || (await gitBlobShaText(cached.content)) === ghSha) {
-            return { path, ghSha, op: 'skip' as const, content: null };
-          }
-          if (await isLocalSavedSha(cached.content, cached.sha)) {
-            // R2 側にローカル保存（未 push）の変更がある → 同期衝突
-            const remote = await fetchBlobContent(baseUrl, token, owner, repoName, ghSha);
-            return { path, ghSha, op: 'conflict' as const, content: null, remote };
-          }
-          // R2 は古い GitHub 内容（未編集）→ GitHub 側の変更を取り込む
+        chunk.map(async ({ path, ghSha }) => {
           const content = await fetchBlobContent(baseUrl, token, owner, repoName, ghSha);
-          return { path, ghSha, op: 'fetch' as const, content };
+          return content === null ? null : { path, ghSha, content };
         }),
       );
       for (const result of chunkResults) {
-        if (result.op === 'skip') {
-          continue;
+        if (result === null) {
+          continue; // 取得失敗は次回の再実行で再試行される（冪等）
         }
-        if (result.op === 'conflict') {
-          // oxlint-disable-next-line no-await-in-loop -- 衝突ノートのローカル内容読み出し（順次適用の意図）のため
-          const cached = await readCachedNote(bucket, owner, repoName, result.path);
-          conflicts.push({
-            path: result.path,
-            local: cached?.content ?? '',
-            remote: result.remote ?? '',
-            remoteSha: result.ghSha,
-          });
-          continue;
-        }
-        if (result.content === null) {
-          continue;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- 取得済みノートの R2 書き込み（チャンク内で順次実行）のため
+        // oxlint-disable-next-line no-await-in-loop -- 取得済みノートの R2 書き込み（順次実行）のため
         await writeCachedNote(bucket, owner, repoName, result.path, {
           sha: result.ghSha,
           content: result.content,
         });
         pulled += 1;
       }
+    }
+
+    // 2c) 未処理の fetch 対象が残っている場合は中断する（syncing）。プル削除・
+    //     プッシュ・meta 更新は全フェッチ完了後に行う（部分状態で進めると
+    //     整合性が崩れるため）。冪等なので、呼び出し側が再実行すれば続く
+    const remaining = fetchTargets.length - fetchChunk.length;
+    if (remaining > 0) {
+      return {
+        ok: true,
+        result: {
+          status: 'syncing',
+          syncedAt: now().toISOString(),
+          pulled,
+          pushed: 0,
+          conflicts: [],
+          remaining,
+        },
+      };
+    }
+
+    // 2d) 衝突の remote 内容を取得して conflicts に格納する（fetch バジェットの
+    //     残り。件数は通常ごく少数で、大量衝突は異常時として許容する）
+    for (const conflict of localConflicts) {
+      // oxlint-disable-next-line no-await-in-loop -- 衝突 remote の順次取得のため
+      const remote = await fetchBlobContent(baseUrl, token, owner, repoName, conflict.ghSha);
+      conflicts.push({
+        path: conflict.path,
+        local: conflict.local,
+        remote: remote ?? '',
+        remoteSha: conflict.ghSha,
+      });
     }
 
     // 3) プル: GitHub 側で削除されたノートを R2 から削除する。

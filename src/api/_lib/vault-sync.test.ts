@@ -229,6 +229,46 @@ describe('syncVault（プル: ツリー sha 比較）', () => {
     expect(tree?.entries).toContainEqual({ path: 'new.md', type: 'file', sha: 'sha-new' });
   });
 
+  it('大量ノートの差分はチャンク化され、複数リクエストで完了する（回帰）', async () => {
+    // Workers Free のサブリクエスト制限（50 件）を守るため、1 リクエストでは
+    // 40 件までしか blob を取得しない。41 件の新規差分がある Vault は 1 回目で
+    // syncing を返し、2 回目で完了する（2026-08-16 の事故後に導入したチャンク化）
+    const bucket = createFakeR2Bucket();
+    await seedSyncedVault(bucket, 'tree-1');
+    const newCount = 41;
+    mockGithubApi({
+      treeSha: 'tree-2',
+      blobs: [
+        { path: 'a.md', sha: 'sha-a', content: '# A\n' },
+        { path: 'b.md', sha: 'sha-b', content: '# B\n' },
+        ...Array.from({ length: newCount }, (_, i) => ({
+          path: `new-${i}.md`,
+          sha: `sha-new-${i}`,
+          content: `# New ${i}\n`,
+        })),
+      ],
+    });
+
+    // 1 回目: 40 件まで取り込み、残り 1 件を返す（meta はまだ更新されない）
+    const first = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.result.status).toBe('syncing');
+    expect(first.result.remaining).toBe(1);
+    expect(first.result.pulled).toBe(40);
+    const metaAfterFirst = await readVaultMeta(bucket, OWNER, REPO);
+    expect(metaAfterFirst?.treeSha).toBe('tree-1');
+
+    // 2 回目: 残り 1 件を取り込み、完了する
+    const second = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.result.status).toBe('synced');
+    expect(second.result.pulled).toBe(1);
+    const metaAfterSecond = await readVaultMeta(bucket, OWNER, REPO);
+    expect(metaAfterSecond?.treeSha).toBe('tree-2');
+  });
+
   it('GitHub 側で変更されたノートを、R2 が未編集なら取り込む', async () => {
     const bucket = createFakeR2Bucket();
     await seedSyncedVault(bucket, 'tree-1');
