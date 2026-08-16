@@ -141,6 +141,14 @@ export async function runScheduledSync(env: Env): Promise<void> {
         await recordSyncFailure(bucket, vault.owner, vault.repo, outcome.reason);
         continue;
       }
+      if (outcome.result.status === 'syncing') {
+        // チャンク化（Workers Free のサブリクエスト制限）により、1 回の Cron では
+        // 処理しきれない差分が残っている。冪等なので次回 Cron で続きが消化される
+        console.log(
+          `[tektite] scheduled sync: ${vault.owner}/${vault.repo} 途中（remaining=${outcome.result.remaining}, pulled=${outcome.result.pulled}）`,
+        );
+        continue;
+      }
       console.log(
         `[tektite] scheduled sync: ${vault.owner}/${vault.repo} 完了（pulled=${outcome.result.pulled}, pushed=${outcome.result.pushed}）`,
       );

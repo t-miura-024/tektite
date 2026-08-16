@@ -215,6 +215,50 @@ describe('POST /api/vaults/:owner/:repo/sync', () => {
     ]);
   });
 
+  it('大量ノートの初期同期はチャンク化され、複数リクエストで完了する（回帰）', async () => {
+    // Workers Free のサブリクエスト制限（50 件）を守るため、1 リクエストでは
+    // 40 件までしか blob を取得しない。41 件のノートがある Vault は 1 回目で
+    // syncing + remaining: 1 を返し、2 回目で完了する（2026-08-16 の事故後に
+    // 導入したチャンク化の回帰テスト）
+    const blobCount = 41;
+    const tree = Array.from({ length: blobCount }, (_, i) => ({
+      path: `note-${i}.md`,
+      type: 'blob',
+      sha: `sha-${i}`,
+    }));
+    mocks.githubApiFetch.mockImplementation(async (_base: string, path: string) => {
+      if (path === '/repos/octocat/notes') {
+        return jsonResponse(REPO_INFO);
+      }
+      if (path.startsWith('/repos/octocat/notes/git/trees/')) {
+        return jsonResponse({ sha: 'tree-sha-1', truncated: false, tree });
+      }
+      if (path.startsWith('/repos/octocat/notes/git/blobs/')) {
+        const sha = path.split('/').at(-1) ?? '';
+        const match = /^sha-(\d+)$/.exec(sha);
+        if (!match) {
+          return jsonResponse({ message: 'Not Found' }, 404);
+        }
+        return jsonResponse({ sha, encoding: 'base64', content: btoa(`# Note ${match[1]}`) });
+      }
+      return jsonResponse({ message: `no mock for ${path}` }, 404);
+    });
+    const bucket = createBucket();
+
+    // 1 回目: 40 件まで取り込み、残り 1 件を返す（meta はまだ書かれない）
+    const first = await handleVaultSyncPost(getContext(bucket));
+    expect(first.status).toBe(200);
+    expect(await readJson(first)).toMatchObject({ status: 'syncing', remaining: 1 });
+    expect(await readVaultMeta(bucket, 'octocat', 'notes')).toBeNull();
+
+    // 2 回目: 残り 1 件を取り込み、完了する
+    const second = await handleVaultSyncPost(getContext(bucket));
+    expect(second.status).toBe(200);
+    // notes は「このリクエストで取得したノート数」（残り 1 件）を報告する
+    expect(await readJson(second)).toMatchObject({ status: 'initialized', notes: 1 });
+    expect(await readVaultMeta(bucket, 'octocat', 'notes')).not.toBeNull();
+  });
+
   it('既に同期済みで変更がない場合は差分同期して synced を返す（GitHub はツリー 1 回のみ）', async () => {
     mockGithubSuccess();
     const bucket = createBucket();

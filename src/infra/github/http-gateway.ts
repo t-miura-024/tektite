@@ -307,7 +307,10 @@ function parseSyncBody(body: unknown): VaultSyncResult | null {
   if (
     !owner ||
     !name ||
-    (body.status !== 'initialized' && body.status !== 'already_synced' && body.status !== 'synced')
+    (body.status !== 'initialized' &&
+      body.status !== 'already_synced' &&
+      body.status !== 'synced' &&
+      body.status !== 'syncing')
   ) {
     return null;
   }
@@ -336,6 +339,7 @@ function parseSyncBody(body: unknown): VaultSyncResult | null {
     ...(typeof body.pulled === 'number' ? { pulled: body.pulled } : {}),
     ...(typeof body.pushed === 'number' ? { pushed: body.pushed } : {}),
     ...(conflicts !== undefined ? { conflicts } : {}),
+    ...(typeof body.remaining === 'number' ? { remaining: body.remaining } : {}),
   };
 }
 
