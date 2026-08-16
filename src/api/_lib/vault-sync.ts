@@ -28,8 +28,11 @@
  * - 衝突保留中のノートはプッシュ対象から除外する（解決後に同期される）
  * - 「GitHub ツリーに無いが前回同期時点に存在した」（= GitHub 側で削除された）
  *   ファイルは復活させない（スキップ）
- * - ローカル削除（tombstone）のあるパスは、GitHub ツリーに残っていれば
- *   削除として反映する（ツリーキャッシュから消えた削除パスも検出できる）
+ * - 削除の反映は tombstone（ファイル操作の delete / move が記録する明示的な
+ *   ローカル削除マーカー）のみを根拠にする。状態からの推論（「R2 に無い =
+ *   削除」）は 2026-08-16 の大量削除事故を招いたため廃止した
+ * - 1 回の push の削除件数は上限（MAX_SYNC_DELETIONS）でガードし、超過時は
+ *   意図しない大量削除の可能性があるため同期を中断する
  *
  * 結果:
  * - 成功: ツリーキャッシュと meta（syncedAt / treeSha）を更新し、
@@ -105,7 +108,8 @@ export type SyncFailureReason =
   | 'invalid_vault'
   | 'kv_missing'
   | 'no_token'
-  | 'refresh_failed';
+  | 'refresh_failed'
+  | 'too_many_deletes';
 
 /** 同期衝突 1 件（プル時に GitHub 側の変更と R2 側の未 push 変更が重なった Note） */
 export interface SyncConflict {
@@ -178,6 +182,9 @@ function encodeBase64Bytes(bytes: Uint8Array): string {
 
 /** Blob 並列取得の同時実行上限（GitHub のレートリミット消費を抑える） */
 const BLOB_FETCH_CONCURRENCY = 8;
+
+/** 1 回の同期 push で許容する削除件数の上限（削除ガードの安全弁） */
+const MAX_SYNC_DELETIONS = 100;
 
 /** GitHub ツリー取得（GitHub 到達不能・レートリミットはエラー応答を返す） */
 async function fetchGithubTree(
@@ -421,6 +428,22 @@ export async function syncVault(
     if (error instanceof SyncPushError) {
       return { ok: false, reason: 'github_error', response: error.response };
     }
+    if (error instanceof SyncDeleteGuardError) {
+      return {
+        ok: false,
+        reason: 'too_many_deletes',
+        response: Response.json(
+          {
+            error: 'too_many_deletes',
+            message:
+              `1 回の同期で削除されるファイルが多すぎます（${error.count} 件）。` +
+              '意図しない削除の可能性があるため同期を中断しました。' +
+              '意図的な整理の場合は GitHub 側で先に削除してから同期してください。',
+          },
+          { status: 409 },
+        ),
+      };
+    }
     throw error;
   }
 
@@ -565,16 +588,19 @@ async function pushPendingChanges(
     changes.push({ op: 'update', path, to: null, content: base64 });
   }
 
-  // R2 で削除されたファイル → GitHub からも削除する
+  // R2 で削除されたファイル → GitHub からも削除する。
+  // 削除判定は tombstone（ファイル操作の delete / move が記録する明示的な
+  // ローカル削除マーカー）のみを根拠にする。かつては「ツリーキャッシュにあり
+  // GitHub にもあるが R2 に無い = ローカル削除」という推論も併用していたが、
+  // 初期同期が Markdown 以外を取り込まないこと・取得失敗でノートが欠落することと
+  // 組み合わさり、GitHub 側のファイルを大量削除する事故を起こした
+  // （2026-08-16: note リポジトリで 300 ファイル削除）。
+  // 破壊的操作は状態からの推論ではなく、明示的な操作記録のみを信頼する
   const r2Paths = new Set([
     ...notes.map((entry) => entry.path),
     ...raws.map((entry) => entry.path),
   ]);
   const deletePaths = new Set<string>();
-  // ローカル削除（tombstone）: R2 とツリーキャッシュの両方から消えたパスも
-  // 検出できる（commit.ts の applyChangesToR2 が削除時に記録する）。削除後に
-  // 同じパスへ再作成した場合は r2Paths に含まれるためスキップされ、作成/更新
-  // として反映される
   for (const path of await listVaultDeleted(bucket, owner, repoName)) {
     if (conflictPaths.has(path) || r2Paths.has(path)) {
       continue;
@@ -583,15 +609,11 @@ async function pushPendingChanges(
       deletePaths.add(path);
     }
   }
-  // ツリーキャッシュ基準の従来検出（tombstone を経由しない削除の防衛線。
-  // 同一パスは tombstone 側と重複しないよう除外する）
-  for (const [path, cachedSha] of cachedShas) {
-    if (conflictPaths.has(path) || deletePaths.has(path)) {
-      continue;
-    }
-    if (cachedSha !== null && ghMap.has(path) && !r2Paths.has(path)) {
-      deletePaths.add(path);
-    }
+  // 削除ガード: 1 回の push で削除される件数の上限。これを超える削除は
+  // 意図しない大量削除（バグ・誤操作）の可能性が高いため push を中断する
+  // （安全弁。意図的な大量整理は GitHub 側で削除してから同期する）
+  if (deletePaths.size > MAX_SYNC_DELETIONS) {
+    throw new SyncDeleteGuardError(deletePaths.size);
   }
   for (const path of deletePaths) {
     changes.push({ op: 'delete', path, to: null, content: null });
@@ -617,6 +639,21 @@ export class SyncPushError extends Error {
     super('sync push failed');
     this.name = 'SyncPushError';
     this.response = response;
+  }
+}
+
+/**
+ * 1 回の push で削除されるファイル数が上限（MAX_SYNC_DELETIONS）を超えたことを
+ * 表す例外。意図しない大量削除の安全弁（削除ガード）で、呼び出し側が
+ * SyncFailureReason 'too_many_deletes' として処理する。
+ */
+export class SyncDeleteGuardError extends Error {
+  readonly count: number;
+
+  constructor(count: number) {
+    super('too many deletions in a single sync');
+    this.name = 'SyncDeleteGuardError';
+    this.count = count;
   }
 }
 

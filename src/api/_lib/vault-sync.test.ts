@@ -503,6 +503,73 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
     expect(treeBody.tree?.find((entry) => entry.path === 'attachments/a.png')?.sha).toBeNull();
     expect(await isVaultDeleted(bucket, OWNER, REPO, 'attachments/a.png')).toBe(false);
   });
+
+  it('R2 に取り込まれていないファイル（tombstone なし）を削除として push しない（回帰）', async () => {
+    // 2026-08-16 の事故: 初期同期が Markdown 以外を取り込まない・取得失敗で
+    // ノートが欠落する状態で、push が「ツリーキャッシュにあり GitHub にあるが
+    // R2 に無い」ファイルを「ローカル削除」と誤認して GitHub から大量削除した。
+    // 削除判定は tombstone（明示的な削除操作）のみを根拠にする仕様の回帰テスト
+    const bucket = createFakeR2Bucket();
+    await seedSyncedVault(bucket, 'tree-1');
+    // image.png はツリーキャッシュに存在するが R2（notes/raw）には取り込まれていない
+    const tree = await readVaultTree(bucket, OWNER, REPO);
+    if (tree) {
+      await writeVaultTree(bucket, OWNER, REPO, {
+        ...tree,
+        entries: [...tree.entries, { path: 'image.png', type: 'file', sha: 'sha-png' }],
+      });
+    }
+    mockGithubApi({
+      treeSha: 'tree-1',
+      blobs: [
+        { path: 'a.md', sha: 'sha-a', content: '# A\n' },
+        { path: 'b.md', sha: 'sha-b', content: '# B\n' },
+        { path: 'image.png', sha: 'sha-png', content: 'png-bytes' },
+      ],
+    });
+
+    const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    // image.png の削除は push されない（変更なし扱い）
+    expect(outcome.result.pushed).toBe(0);
+    const treePosts = mocks.githubApiFetch.mock.calls.filter(
+      ([, path, , init]) => String(path).endsWith('/git/trees') && init?.method === 'POST',
+    );
+    expect(treePosts).toHaveLength(0);
+  });
+
+  it('削除ガード: 1 回の push で上限（100 件）を超える削除は too_many_deletes で中断する', async () => {
+    const bucket = createFakeR2Bucket();
+    await seedSyncedVault(bucket, 'tree-1');
+    // 101 件のローカル削除（tombstone）を記録する
+    const deletedPaths = Array.from({ length: 101 }, (_, i) => `deleted-${i}.md`);
+    await Promise.all(deletedPaths.map((path) => markVaultDeleted(bucket, OWNER, REPO, path)));
+    mockGithubApi({
+      treeSha: 'tree-1',
+      blobs: [
+        { path: 'a.md', sha: 'sha-a', content: '# A\n' },
+        { path: 'b.md', sha: 'sha-b', content: '# B\n' },
+        ...deletedPaths.map((path, i) => ({
+          path,
+          sha: `sha-del-${i}`,
+          content: `# Deleted ${i}\n`,
+        })),
+      ],
+    });
+
+    const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('too_many_deletes');
+    // GitHub へのコミットは発生していない（誤削除の防波堤）
+    const commitPosts = mocks.githubApiFetch.mock.calls.filter(
+      ([, path, , init]) => String(path).endsWith('/git/commits') && init?.method === 'POST',
+    );
+    expect(commitPosts).toHaveLength(0);
+    // tombstone は残っている（削除は未反映）
+    expect(await isVaultDeleted(bucket, OWNER, REPO, 'deleted-0.md')).toBe(true);
+  });
 });
 
 describe('listSyncedVaults / recordSyncFailure', () => {

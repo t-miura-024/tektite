@@ -321,7 +321,50 @@ describe('POST /api/vaults/:owner/:repo/sync', () => {
     expect(tree?.entries).toEqual([]);
   });
 
-  it('ノート取得の失敗（404）は欠落させて同期を続行する', async () => {
+  it('ノート取得の一時的な失敗はリトライで吸収して初期同期を完了する', async () => {
+    mockGithubSuccess();
+    // sha-daily の blob 取得を 1 回目だけ 404 にし、2 回目で成功させる
+    let dailyAttempts = 0;
+    mocks.githubApiFetch.mockImplementation(async (_base: string, path: string) => {
+      if (path === '/repos/octocat/notes') {
+        return jsonResponse(REPO_INFO);
+      }
+      if (path.startsWith('/repos/octocat/notes/git/trees/')) {
+        return jsonResponse(TREE_RESPONSE);
+      }
+      if (path.startsWith('/repos/octocat/notes/git/blobs/')) {
+        if (path.endsWith('sha-daily')) {
+          dailyAttempts += 1;
+          if (dailyAttempts === 1) {
+            return jsonResponse({ message: 'Not Found' }, 404);
+          }
+          return jsonResponse({ sha: 'sha-daily', encoding: 'base64', content: btoa('# Daily') });
+        }
+        return jsonResponse({
+          sha: 'sha-readme',
+          encoding: 'base64',
+          content: btoa('# README'),
+        });
+      }
+      return jsonResponse({ message: `no mock for ${path}` }, 404);
+    });
+    const bucket = createBucket();
+
+    const response = await handleVaultSyncPost(getContext(bucket));
+    expect(response.status).toBe(200);
+    expect((await readJson(response)).notes).toBe(2);
+    expect(dailyAttempts).toBe(2);
+    const notes = await listCachedNotes(bucket, 'octocat', 'notes');
+    expect(notes.map((entry) => entry.path).toSorted()).toEqual([
+      'README.md',
+      'daily/2026-08-13.md',
+    ]);
+  });
+
+  it('ノート取得の失敗（リトライ後も 404）は初期同期を失敗させ、meta を書かない（回帰）', async () => {
+    // 2026-08-16 の事故: 取得失敗ノートの「欠落」は、その後の同期 push が
+    // 「R2 に無い = 削除」と誤認する原因になった。欠落を許さず、初期同期を
+    // 失敗させる（meta が無いため次回の初期同期で全量がやり直される）
     mockGithubSuccess();
     // sha-daily の blob 取得を 404 にする
     mocks.githubApiFetch.mockImplementation(async (_base: string, path: string) => {
@@ -346,10 +389,9 @@ describe('POST /api/vaults/:owner/:repo/sync', () => {
     const bucket = createBucket();
 
     const response = await handleVaultSyncPost(getContext(bucket));
-    expect(response.status).toBe(200);
-    expect((await readJson(response)).notes).toBe(1);
-    const notes = await listCachedNotes(bucket, 'octocat', 'notes');
-    expect(notes.map((entry) => entry.path)).toEqual(['README.md']);
+    expect(response.status).toBe(502);
+    // 完了マーカーが書かれていないため、R2 は「正」にならない（GitHub 直行が続く）
+    expect(await readVaultMeta(bucket, 'octocat', 'notes')).toBeNull();
   });
 
   it('R2 バインディングがない環境は 503 storage_unavailable を返す', async () => {

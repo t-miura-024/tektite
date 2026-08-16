@@ -80,9 +80,16 @@ function decodeBase64Content(encoded: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+/** Blob 取得の最大試行回数（一時的な失敗はリトライで吸収する） */
+const BLOB_FETCH_RETRIES = 3;
+
 /**
- * Blob 1 件を取得して本文を返す（ネットワーク断・404・形式不正は null）。
- * 失敗を null に握りつぶすことで、1 ノートの失敗が同期全体を落とさない。
+ * Blob 1 件を取得して本文を返す（リトライ後も失敗・404・形式不正は null）。
+ *
+ * 初期同期で取得に失敗したノートを「欠落」させると、その後の同期 push が
+ * 「R2 に無い = 削除」と誤認する事故（2026-08-16 の大量削除）につながる。
+ * 一時的な失敗（ネットワーク断・レートリミットの突発的な発生）はリトライで
+ * 吸収する。
  */
 async function fetchBlobContent(
   baseUrl: string,
@@ -91,27 +98,42 @@ async function fetchBlobContent(
   repoName: string,
   sha: string,
 ): Promise<string | null> {
-  let response: Response;
-  try {
-    response = await githubApiFetch(
-      baseUrl,
-      `/repos/${owner}/${repoName}/git/blobs/${encodeURIComponent(sha)}`,
-      token,
-    );
-  } catch {
-    return null;
+  for (let attempt = 1; attempt <= BLOB_FETCH_RETRIES; attempt += 1) {
+    let response: Response;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- リトライを伴う逐次取得が意図のため
+      response = await githubApiFetch(
+        baseUrl,
+        `/repos/${owner}/${repoName}/git/blobs/${encodeURIComponent(sha)}`,
+        token,
+      );
+    } catch {
+      if (attempt < BLOB_FETCH_RETRIES) {
+        // oxlint-disable-next-line no-await-in-loop -- リトライ間隔のバックオフ待機のため
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        continue;
+      }
+      return null;
+    }
+    if (!response.ok) {
+      if (attempt < BLOB_FETCH_RETRIES) {
+        // oxlint-disable-next-line no-await-in-loop -- リトライ間隔のバックオフ待機のため
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        continue;
+      }
+      return null;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- リトライを伴う逐次取得が意図のため
+    const body = (await response.json().catch(() => null)) as {
+      content?: unknown;
+      encoding?: unknown;
+    } | null;
+    if (!body || body.encoding !== 'base64' || typeof body.content !== 'string') {
+      return null;
+    }
+    return decodeBase64Content(body.content);
   }
-  if (!response.ok) {
-    return null;
-  }
-  const body = (await response.json().catch(() => null)) as {
-    content?: unknown;
-    encoding?: unknown;
-  } | null;
-  if (!body || body.encoding !== 'base64' || typeof body.content !== 'string') {
-    return null;
-  }
-  return decodeBase64Content(body.content);
+  return null;
 }
 
 /** Markdown blob 並列取得の同時実行上限（GitHub のレートリミット消費を抑える） */
@@ -297,7 +319,11 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
     }
   }
 
-  // 4) Markdown blob を同時 8 件ずつ取得して R2 へ書き込む（失敗ノートは欠落させる）
+  // 4) Markdown blob を同時 8 件ずつ取得して R2 へ書き込む。
+  //    取得に失敗したノートがある場合は初期同期を失敗させる。部分成功のまま
+  //    完了マーカー（meta）を書くと、R2 が不完全な状態で「R2 が正」になり、
+  //    その後の同期が誤動作する（2026-08-16 の大量削除事故の再発防止）。
+  //    失敗時は meta が無いため、次回の初期同期で全量がやり直される
   let notes = 0;
   for (let offset = 0; offset < noteBlobs.length; offset += BLOB_FETCH_CONCURRENCY) {
     const chunk = noteBlobs.slice(offset, offset + BLOB_FETCH_CONCURRENCY);
@@ -310,7 +336,13 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
     );
     for (const result of chunkResults) {
       if (result === null) {
-        continue;
+        return Response.json(
+          {
+            error: 'github_error',
+            message: 'ノートの取得に失敗しました。しばらくしてからもう一度お試しください。',
+          },
+          { status: 502 },
+        );
       }
       // oxlint-disable-next-line no-await-in-loop -- 取得済みノートの R2 書き込み（チャンク内で順次実行）のため
       await writeCachedNote(bucket, owner, repoName, result.path, {
