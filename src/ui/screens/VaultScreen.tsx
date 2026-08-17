@@ -266,59 +266,64 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
   // （ツリー ↔ ノートのルーティング往来で再取得しないため）
   const { owner, name } = vaultRef;
 
-  const load = useCallback(async (): Promise<void> => {
-    setState({ kind: 'loading' });
-    // 初期同期: 初回のみ GitHub から R2 へ全量を取り込み、以降は R2 読み取りに
-    // なる（サーバーは同期済みなら GitHub を消費せず即完了を返す）。失敗しても
-    // ツリー取得へ進む（R2 未設定環境のフォールバック。実エラーはトースト通知）
-    setInitializing(true);
-    setSyncProgress(null);
-    try {
-      await run(initializeVault({ owner, name }, setSyncProgress));
-    } catch (error) {
-      if (isSessionExpiredError(error)) {
+  const load = useCallback(
+    async (initialize = true): Promise<void> => {
+      setState({ kind: 'loading' });
+      if (initialize) {
+        // 初期同期: 初回のみ GitHub から R2 へ全量を取り込み、以降は R2 読み取りに
+        // なる（サーバーは同期済みなら GitHub を消費せず即完了を返す）。失敗しても
+        // ツリー取得へ進む（R2 未設定環境のフォールバック。実エラーはトースト通知）
+        setInitializing(true);
+        setSyncProgress(null);
+        try {
+          await run(initializeVault({ owner, name }, setSyncProgress));
+        } catch (error) {
+          if (isSessionExpiredError(error)) {
+            setInitializing(false);
+            setSyncProgress(null);
+            notify('セッションの有効期限が切れました。ログインし直してください。');
+            onSessionExpired();
+            return;
+          }
+          notify(vaultErrorMessage(error));
+        }
         setInitializing(false);
         setSyncProgress(null);
-        notify('セッションの有効期限が切れました。ログインし直してください。');
-        onSessionExpired();
+      }
+      try {
+        const tree = await run(openVault({ owner, name }));
+        setState({ kind: 'ready', tree });
+      } catch (error) {
+        if (isSessionExpiredError(error)) {
+          notify('セッションの有効期限が切れました。ログインし直してください。');
+          onSessionExpired();
+          return;
+        }
+        const message = vaultErrorMessage(error);
+        setState({ kind: 'error', message });
+        // ツリー取得失敗時も検索パネル・クイックスイッチャーを「読み込み中…」のままに
+        // しない（indexError を設定し、エラー表示 + 再試行導線へ切り替える）
+        // （difit 指摘: ツリー取得失敗時の indexError 未設定）
+        setIndexError(message);
+        notify(message, { label: '再試行', onClick: () => void load() });
         return;
       }
-      notify(vaultErrorMessage(error));
-    }
-    setInitializing(false);
-    setSyncProgress(null);
-    try {
-      const tree = await run(openVault({ owner, name }));
-      setState({ kind: 'ready', tree });
-    } catch (error) {
-      if (isSessionExpiredError(error)) {
-        notify('セッションの有効期限が切れました。ログインし直してください。');
-        onSessionExpired();
-        return;
+      // ツリー取得成功後、全ノートを共有索引へ展開する。索引の失敗はツリー表示を
+      // 妨げない（タグ一覧・バックリンクが非表示になるだけ）。既に展開済みの Vault は
+      // レジストリが再取得せず同じ索引を返す。失敗はトーストに加えて indexError に
+      // 保持し、検索パネル・クイックスイッチャーが再試行導線を表示できるようにする
+      try {
+        const index = await run(loadNoteIndex({ owner, name }));
+        setNoteIndex(index);
+        setIndexError(null);
+      } catch (error) {
+        const message = vaultErrorMessage(error);
+        setIndexError(message);
+        notify('ノート索引を取得できませんでした。タグ・バックリンクは表示されません。');
       }
-      const message = vaultErrorMessage(error);
-      setState({ kind: 'error', message });
-      // ツリー取得失敗時も検索パネル・クイックスイッチャーを「読み込み中…」のままに
-      // しない（indexError を設定し、エラー表示 + 再試行導線へ切り替える）
-      // （difit 指摘: ツリー取得失敗時の indexError 未設定）
-      setIndexError(message);
-      notify(message, { label: '再試行', onClick: () => void load() });
-      return;
-    }
-    // ツリー取得成功後、全ノートを共有索引へ展開する。索引の失敗はツリー表示を
-    // 妨げない（タグ一覧・バックリンクが非表示になるだけ）。既に展開済みの Vault は
-    // レジストリが再取得せず同じ索引を返す。失敗はトーストに加えて indexError に
-    // 保持し、検索パネル・クイックスイッチャーが再試行導線を表示できるようにする
-    try {
-      const index = await run(loadNoteIndex({ owner, name }));
-      setNoteIndex(index);
-      setIndexError(null);
-    } catch (error) {
-      const message = vaultErrorMessage(error);
-      setIndexError(message);
-      notify('ノート索引を取得できませんでした。タグ・バックリンクは表示されません。');
-    }
-  }, [owner, name, notify, onSessionExpired]);
+    },
+    [owner, name, notify, onSessionExpired],
+  );
 
   useEffect(() => {
     void load();
@@ -375,7 +380,11 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
         );
       }
       // ツリー・索引・同期状態を最新化する（ツリーは R2 から読み直すため GitHub は消費しない）
-      await load();
+      // 同期 API は既に完了しているため、再読み込みで初期同期を再実行しない。
+      // 先にオーバーレイを解除し、ツリー・索引の更新はバックグラウンドで行う。
+      setSyncing(false);
+      setSyncProgress(null);
+      await load(false);
       const status = await run(fetchVaultSyncStatus({ owner, name })).catch(() => null);
       if (status !== null) {
         setSyncStatus(status);
