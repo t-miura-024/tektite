@@ -134,6 +134,32 @@ export const openVault = (ref: VaultRef): Effect.Effect<VaultTree, VaultFetchErr
  */
 const MAX_SYNC_ITERATIONS = 100;
 
+/** 同期の進捗通知（オーバーレイ表示用）。残件数の減りから概算する */
+export interface SyncProgress {
+  /** 残っている未処理の同期対象数 */
+  readonly remaining: number;
+  /** 進捗率（0〜1）。初回の残件数を基準に概算する */
+  readonly fraction: number;
+}
+
+/**
+ * 同期の進捗をコールバックへ通知するヘルパー。初回の残件数を基準に、
+ * 現在の残件数から進捗率（0〜1）を計算する。
+ */
+function notifyProgress(
+  result: VaultSyncResult,
+  initialRemaining: number,
+  onProgress?: (progress: SyncProgress) => void,
+): void {
+  if (!onProgress) {
+    return;
+  }
+  const remaining = result.remaining ?? 0;
+  const fraction =
+    initialRemaining > 0 ? Math.min(1, (initialRemaining - remaining) / initialRemaining) : 1;
+  onProgress({ remaining, fraction });
+}
+
 /**
  * Vault の初期同期を実行する（GitHub → R2 の全量取り込み）。
  * R2 に同期済みメタがある場合はサーバーが即座に完了を返すため、
@@ -142,19 +168,28 @@ const MAX_SYNC_ITERATIONS = 100;
  * 大量ノートの Vault ではサーバーが 1 リクエスト 40 件ずつしか取り込めない
  * （Workers Free のサブリクエスト制限への対応）ため、status が 'syncing' の間
  * 同じ呼び出しを繰り返す（サーバー側の処理は冪等で、既取得分は自動スキップされる）。
+ * 各反復の進捗は onProgress で通知される。
  */
 export const initializeVault = (
   ref: VaultRef,
+  onProgress?: (progress: SyncProgress) => void,
 ): Effect.Effect<VaultSyncResult, VaultFetchError, VaultGateway> =>
   Effect.gen(function* () {
     const gateway = yield* VaultGateway;
     let result = yield* gateway.initializeSync(ref);
+    const initialRemaining = result.remaining ?? 0;
+    if (result.status === 'syncing') {
+      notifyProgress(result, initialRemaining, onProgress);
+    }
     for (
       let attempt = 0;
       attempt < MAX_SYNC_ITERATIONS && result.status === 'syncing';
       attempt += 1
     ) {
       result = yield* gateway.initializeSync(ref);
+      if (result.status === 'syncing') {
+        notifyProgress(result, initialRemaining, onProgress);
+      }
     }
     return result;
   });
@@ -167,19 +202,28 @@ export const initializeVault = (
  *
  * 大量の差分がある Vault ではサーバーが 1 リクエスト 40 件ずつしか処理できない
  * ため、status が 'syncing' の間同じ呼び出しを繰り返す（冪等）。
+ * 各反復の進捗は onProgress で通知される。
  */
 export const syncVault = (
   ref: VaultRef,
+  onProgress?: (progress: SyncProgress) => void,
 ): Effect.Effect<VaultSyncResult, VaultFetchError, VaultGateway> =>
   Effect.gen(function* () {
     const gateway = yield* VaultGateway;
     let result = yield* gateway.syncVault(ref);
+    const initialRemaining = result.remaining ?? 0;
+    if (result.status === 'syncing') {
+      notifyProgress(result, initialRemaining, onProgress);
+    }
     for (
       let attempt = 0;
       attempt < MAX_SYNC_ITERATIONS && result.status === 'syncing';
       attempt += 1
     ) {
       result = yield* gateway.syncVault(ref);
+      if (result.status === 'syncing') {
+        notifyProgress(result, initialRemaining, onProgress);
+      }
     }
     return result;
   });
