@@ -16,7 +16,7 @@
  * ユースケースの実行は組成ルート（src/composition）の run() 経由で行う。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 import { applyFileOperation } from '@/application/file';
@@ -26,7 +26,7 @@ import type { NoteIndex } from '@/application/note-index';
 import { createNoteSearcher } from '@/application/search';
 import type { NoteSearcher, SearchableNote } from '@/application/search';
 import { initializeVault, openVault, fetchVaultSyncStatus, syncVault } from '@/application/vault';
-import type { VaultSyncConflict, VaultSyncStatus } from '@/application/vault';
+import type { SyncProgress, VaultSyncConflict, VaultSyncStatus } from '@/application/vault';
 import { run, slugify } from '@/composition';
 import { buildNotationIndex } from '@/domain/notation/index';
 import type { VaultNotationIndex } from '@/domain/notation/index';
@@ -229,6 +229,21 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
    */
   const [syncing, setSyncing] = useState(false);
   /**
+   * 同期の進捗（オーバーレイ表示用）。初期同期・明示同期の実行中に
+   * application 層から通知される。null は進捗不明（開始直後）か同期中でない。
+   */
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  /** 同期オーバーレイのルート要素（表示中にフォーカスを移して編集をブロックする） */
+  const syncOverlayRef = useRef<HTMLDivElement>(null);
+
+  // 同期中はオーバーレイへフォーカスを移してキー入力を追い出し、背後にある
+  // ノートエディタが意図せず編集されるのを防ぐ
+  useEffect(() => {
+    if (initializing || syncing) {
+      syncOverlayRef.current?.focus();
+    }
+  }, [initializing, syncing]);
+  /**
    * 同期状態（最終同期時刻・失敗マーク。完了条件 10）。
    * Vault オープン時に GET /sync で取得し、定時同期の失敗（lastSyncError）を
    * 表示する。明示同期の成功後は取得し直して最新化する。
@@ -257,11 +272,13 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
     // なる（サーバーは同期済みなら GitHub を消費せず即完了を返す）。失敗しても
     // ツリー取得へ進む（R2 未設定環境のフォールバック。実エラーはトースト通知）
     setInitializing(true);
+    setSyncProgress(null);
     try {
-      await run(initializeVault({ owner, name }));
+      await run(initializeVault({ owner, name }, setSyncProgress));
     } catch (error) {
       if (isSessionExpiredError(error)) {
         setInitializing(false);
+        setSyncProgress(null);
         notify('セッションの有効期限が切れました。ログインし直してください。');
         onSessionExpired();
         return;
@@ -269,6 +286,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       notify(vaultErrorMessage(error));
     }
     setInitializing(false);
+    setSyncProgress(null);
     try {
       const tree = await run(openVault({ owner, name }));
       setState({ kind: 'ready', tree });
@@ -334,8 +352,9 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       return;
     }
     setSyncing(true);
+    setSyncProgress(null);
     try {
-      const result = await run(syncVault({ owner, name }));
+      const result = await run(syncVault({ owner, name }, setSyncProgress));
       const newConflicts = result.conflicts ?? [];
       setSyncConflicts(newConflicts);
       setSyncVersion((version) => version + 1);
@@ -370,6 +389,7 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
       notify(vaultErrorMessage(error));
     } finally {
       setSyncing(false);
+      setSyncProgress(null);
     }
   }, [syncing, owner, name, notePath, notify, onSessionExpired, load]);
 
@@ -1042,6 +1062,31 @@ export function VaultScreen({ vaultRef, notePath, notify, onSessionExpired }: Va
           onRetry={() => void load()}
           onClose={() => setQuickSwitchOpen(false)}
         />
+      )}
+      {(initializing || syncing) && (
+        <div
+          ref={syncOverlayRef}
+          className="sync-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="同期中"
+          aria-busy="true"
+          tabIndex={-1}
+          data-testid="sync-overlay"
+        >
+          <div className="sync-overlay-panel">
+            <div className="sync-spinner" aria-hidden="true" />
+            <p className="sync-overlay-title">
+              {initializing ? 'Vault を初期同期しています…' : 'Vault を同期しています…'}
+            </p>
+            {syncProgress !== null && (
+              <p className="sync-overlay-progress" data-testid="sync-progress">
+                {Math.round(syncProgress.fraction * 100)}%
+                {syncProgress.remaining > 0 ? `（残り約 ${syncProgress.remaining} 件）` : ''}
+              </p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
