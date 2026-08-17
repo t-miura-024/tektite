@@ -53,7 +53,6 @@ import {
   applyVaultTreeChanges,
   clearVaultDeleted,
   deleteCachedNote,
-  isVaultDeleted,
   listCachedNotePaths,
   listCachedNotes,
   listCachedRaws,
@@ -335,6 +334,17 @@ export async function syncVault(
     //    Workers Free のサブリクエスト 50 件制限を守るため）。冪等なため、
     //    リクエストを再実行するだけで未処理分が続きから消化される
     const existingPaths = await listCachedNotePaths(bucket, owner, repoName);
+    // ローカル削除 tombstone を一度に列挙する（isVaultDeleted をノートごとに
+    // 呼ぶと R2 アクセスが O(ノート数) になり、Workers Free の内部サービス
+    // 1,000 件制限を超過するため）
+    const deletedPaths = new Set(await listVaultDeleted(bucket, owner, repoName));
+    // ツリーキャッシュの sha を先に取得する。前回同期から変更のないノートは
+    // ツリーキャッシュの sha と GitHub の sha が一致するため、readCachedNote を
+    // 呼ばずに同一と判定できる（R2 アクセスの削減）
+    const cachedTreeForPull = await readVaultTree(bucket, owner, repoName);
+    const treeFileSha = new Map<string, string | null>(
+      (cachedTreeForPull?.entries ?? []).map((entry) => [entry.path, entry.sha]),
+    );
     const noteBlobs = [...ghMap.entries()].filter(
       ([path, ghSha]) => isNotePath(path) && ghSha.length > 0,
     );
@@ -346,14 +356,19 @@ export async function syncVault(
       if (!existingPaths.has(path)) {
         // R2 に無いノート。ローカル削除（tombstone）のあるパスは取得しない
         // （削除の巻き戻り防止。tombstone が無ければ GitHub 側の新規追加）
-        // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順に分類するため
-        if (await isVaultDeleted(bucket, owner, repoName, path)) {
+        if (deletedPaths.has(path)) {
           continue;
         }
         fetchTargets.push({ path, ghSha });
         continue;
       }
-      // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順に分類するため
+      // ツリーキャッシュの sha が GitHub と一致していれば前回同期から変更なし
+      // （readCachedNote を省略して R2 アクセスを減らす）
+      const cachedTreeSha = treeFileSha.get(path);
+      if (cachedTreeSha !== null && cachedTreeSha === ghSha) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- 変更のあった既存ノートのみ順に読むため
       const cached = await readCachedNote(bucket, owner, repoName, path);
       if (cached === null) {
         // existingPaths に存在するが破損等で読めない → 取得し直す（防衛線）
