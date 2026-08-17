@@ -106,6 +106,19 @@ export function vaultDeletedKey(owner: string, repo: string, path: string): stri
   return `vaults/${owner}/${repo}/deleted/${path}`;
 }
 
+/**
+ * 未プッシュ変更（ローカル保存）の dirty キー（vaults/{owner}/{repo}/dirty/{path}）。
+ *
+ * 保存（notes blob PUT）やファイル操作（一括コミットの create / update / copy / move）
+ * が R2 を書き換えたときに記録する空マーカー。同期プッシュ（vault-sync.ts）が
+ * 「R2 のどのノートを GitHub へ反映すべきか」を、全ノートの本文を読み込まずに
+ * 特定するために使う（Workers Free のサブリクエスト / CPU 制限への対応）。
+ * 同期のプッシュ完了（衝突なし）でクリアされる。
+ */
+export function vaultDirtyKey(owner: string, repo: string, path: string): string {
+  return `vaults/${owner}/${repo}/dirty/${path}`;
+}
+
 /** R2 オブジェクトの JSON を安全にパースする（破損・形式不正は null） */
 async function readJsonObject(
   bucket: R2Bucket,
@@ -473,6 +486,53 @@ export async function listVaultDeleted(
   repo: string,
 ): Promise<readonly string[]> {
   const prefix = `vaults/${owner}/${repo}/deleted/`;
+  const paths: string[] = [];
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- R2 list のページング（truncated 時のみ続行）のため
+    const listed = await bucket.list({
+      prefix,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const object of listed.objects) {
+      const path = object.key.slice(prefix.length);
+      if (path.length > 0) {
+        paths.push(path);
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- R2 list のページング（truncated 時のみ続行）のため
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor !== undefined);
+  return paths;
+}
+
+/** 未プッシュ変更（dirty）を記録する（保存・ファイル操作の R2 書き換え時に呼ぶ） */
+export async function markVaultDirty(
+  bucket: R2Bucket,
+  owner: string,
+  repo: string,
+  path: string,
+): Promise<void> {
+  await bucket.put(vaultDirtyKey(owner, repo, path), '');
+}
+
+/** 未プッシュ変更（dirty）マーカーを消す（同期プッシュの反映後に呼ぶ） */
+export async function clearVaultDirty(
+  bucket: R2Bucket,
+  owner: string,
+  repo: string,
+  path: string,
+): Promise<void> {
+  await bucket.delete(vaultDirtyKey(owner, repo, path));
+}
+
+/** 同期済み Vault の全 dirty パスを列挙する（同期プッシュの差分検出用） */
+export async function listVaultDirty(
+  bucket: R2Bucket,
+  owner: string,
+  repo: string,
+): Promise<readonly string[]> {
+  const prefix = `vaults/${owner}/${repo}/dirty/`;
   const paths: string[] = [];
   let cursor: string | undefined;
   do {

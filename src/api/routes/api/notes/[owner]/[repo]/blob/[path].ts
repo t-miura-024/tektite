@@ -50,6 +50,7 @@ import {
 import { sha256Hex } from '@/api/_lib/content-hash';
 import {
   applyVaultTreeChanges,
+  markVaultDirty,
   readCachedNote,
   readCachedRaw,
   readVaultMeta,
@@ -339,6 +340,9 @@ export async function handleNoteBlobPut(context: RouteContext): Promise<Response
       const content = decodeBase64Content(body.content);
       const savedSha = await sha256Hex(content);
       await writeCachedNote(bucket, owner, repoName, notePath, { sha: savedSha, content });
+      // 未プッシュ変更として記録する（同期プッシュが全ノードを読み込まずに
+      // このノートを GitHub へ反映できるようにする。2026-08-17 の 500 対応）
+      await markVaultDirty(bucket, owner, repoName, notePath);
       if (body.sha === null) {
         // 新規作成: ファイル一覧（ツリー）にも反映する
         await applyVaultTreeChanges(bucket, owner, repoName, [{ op: 'add', path: notePath }]);

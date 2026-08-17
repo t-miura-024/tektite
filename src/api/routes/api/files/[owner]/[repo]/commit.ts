@@ -53,6 +53,7 @@ import {
   deleteCachedNote,
   deleteCachedRaw,
   markVaultDeleted,
+  markVaultDirty,
   readCachedNote,
   readCachedRaw,
   readVaultMeta,
@@ -216,6 +217,9 @@ async function applyChangesToR2(
           sha: noteSha,
           content,
         });
+        // 未プッシュ変更（dirty）を記録する（同期プッシュが対象ノードだけ読めるように）
+        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
+        await markVaultDirty(bucket, owner, repoName, change.path);
       } else {
         const bytes = decodeBase64Bytes(change.content);
         // oxlint-disable-next-line no-await-in-loop -- R2 書き込み（順次適用の意図）のため
@@ -227,6 +231,8 @@ async function applyChangesToR2(
           bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
           inferContentType(change.path),
         );
+        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
+        await markVaultDirty(bucket, owner, repoName, change.path);
       }
       treeChanges.push({ op: 'add', path: change.path });
     } else if (change.op === 'delete') {
@@ -251,6 +257,8 @@ async function applyChangesToR2(
       if (note !== null) {
         // oxlint-disable-next-line no-await-in-loop -- R2 書き込み（順次適用の意図）のため
         await writeCachedNote(bucket, owner, repoName, destination, note);
+        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
+        await markVaultDirty(bucket, owner, repoName, destination);
         if (change.op === 'move') {
           // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
           await deleteCachedNote(bucket, owner, repoName, source);
@@ -278,6 +286,8 @@ async function applyChangesToR2(
         }
         // oxlint-disable-next-line no-await-in-loop -- R2 書き込み（順次適用の意図）のため
         await writeCachedRaw(bucket, owner, repoName, destination, raw.body, raw.contentType);
+        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
+        await markVaultDirty(bucket, owner, repoName, destination);
         if (change.op === 'move') {
           // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
           await deleteCachedRaw(bucket, owner, repoName, source);

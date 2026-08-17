@@ -52,12 +52,13 @@ import { sha256Hex } from '@/api/_lib/content-hash';
 import {
   applyVaultTreeChanges,
   clearVaultDeleted,
+  clearVaultDirty,
   deleteCachedNote,
   listCachedNotePaths,
-  listCachedNotes,
-  listCachedRaws,
   listVaultDeleted,
+  listVaultDirty,
   readCachedNote,
+  readCachedRaw,
   readVaultMeta,
   readVaultTree,
   writeCachedNote,
@@ -543,6 +544,12 @@ export async function syncVault(
       // oxlint-disable-next-line no-await-in-loop -- tombstone の一括クリア（同期完了時の後処理）のため
       await clearVaultDeleted(bucket, owner, repoName, path);
     }
+    // 未プッシュ変更（dirty）もクリアする。この時点で変更は GitHub へ反映済み
+    // （push 済み）のため、以降の同期で再プッシュされない
+    for (const path of await listVaultDirty(bucket, owner, repoName)) {
+      // oxlint-disable-next-line no-await-in-loop -- dirty の一括クリア（同期完了時の後処理）のため
+      await clearVaultDirty(bucket, owner, repoName, path);
+    }
   }
 
   return {
@@ -616,47 +623,58 @@ async function pushPendingChanges(
 
   const changes: ParsedChange[] = [];
 
-  // R2 にあり GitHub に無いファイル → 作成（ローカル新規のみ。
-  // 前回同期時点に存在した = GitHub 側で削除された → 復活させない）
-  const notes = await listCachedNotes(bucket, owner, repoName);
-  for (const { path, note } of notes) {
+  // 未プッシュ変更（dirty）だけを読み込んで差分を計算する。保存・ファイル操作が
+  // R2 を書き換えるたびに dirty マーカーを記録するため、全ノート/全添付の本文を
+  // 読み込まずに「どのファイルを GitHub へ反映すべきか」を特定できる（Workers Free
+  // のサブリクエスト / CPU 制限への対応。2026-08-17 の 500 エラー）
+  const dirtyPaths = await listVaultDirty(bucket, owner, repoName);
+  const r2Paths = new Set<string>();
+  for (const path of dirtyPaths) {
     if (conflictPaths.has(path)) {
       continue;
     }
     const ghSha = ghMap.get(path);
-    if (ghSha === undefined) {
-      if (cachedShas.get(path) === null) {
-        changes.push({ op: 'create', path, to: null, content: encodeBase64Content(note.content) });
+    // ノート（Markdown）として読む。null なら添付（raw）として扱う
+    // oxlint-disable-next-line no-await-in-loop -- dirty ノートを順に読み込むため
+    const note = await readCachedNote(bucket, owner, repoName, path);
+    if (note !== null) {
+      r2Paths.add(path);
+      if (ghSha === undefined) {
+        // R2 にあり GitHub に無い → ローカル新規のみ作成（前回同期時点に存在した
+        // = GitHub 側で削除された → 復活させない）
+        if (cachedShas.get(path) === null) {
+          changes.push({
+            op: 'create',
+            path,
+            to: null,
+            content: encodeBase64Content(note.content),
+          });
+        }
+        continue;
       }
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- 同一判定（順次適用の意図）のため
-    if (note.sha === ghSha || (await gitBlobShaText(note.content)) === ghSha) {
-      continue;
-    }
-    // R2 が古い GitHub 内容のまま（pull 未達）か、ローカル保存。GitHub の
-    // 現在内容と異なるので更新する（衝突保留中は除外済み）
-    changes.push({ op: 'update', path, to: null, content: encodeBase64Content(note.content) });
-  }
-
-  const raws = await listCachedRaws(bucket, owner, repoName);
-  for (const { path, raw } of raws) {
-    if (conflictPaths.has(path)) {
-      continue;
-    }
-    const ghSha = ghMap.get(path);
-    const base64 = encodeBase64Bytes(new Uint8Array(raw.body));
-    if (ghSha === undefined) {
-      if (cachedShas.get(path) === null) {
-        changes.push({ op: 'create', path, to: null, content: base64 });
+      if (note.sha === ghSha) {
+        continue;
       }
+      changes.push({ op: 'update', path, to: null, content: encodeBase64Content(note.content) });
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- 同一判定（順次適用の意図）のため
-    if ((await gitBlobShaHex(new Uint8Array(raw.body))) === ghSha) {
-      continue;
+    // oxlint-disable-next-line no-await-in-loop -- dirty 添付を順に読み込むため
+    const raw = await readCachedRaw(bucket, owner, repoName, path);
+    if (raw !== null) {
+      r2Paths.add(path);
+      const base64 = encodeBase64Bytes(new Uint8Array(raw.body));
+      if (ghSha === undefined) {
+        if (cachedShas.get(path) === null) {
+          changes.push({ op: 'create', path, to: null, content: base64 });
+        }
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- 添付の同一判定のため
+      if ((await gitBlobShaHex(new Uint8Array(raw.body))) === ghSha) {
+        continue;
+      }
+      changes.push({ op: 'update', path, to: null, content: base64 });
     }
-    changes.push({ op: 'update', path, to: null, content: base64 });
   }
 
   // R2 で削除されたファイル → GitHub からも削除する。
@@ -667,10 +685,6 @@ async function pushPendingChanges(
   // 組み合わさり、GitHub 側のファイルを大量削除する事故を起こした
   // （2026-08-16: note リポジトリで 300 ファイル削除）。
   // 破壊的操作は状態からの推論ではなく、明示的な操作記録のみを信頼する
-  const r2Paths = new Set([
-    ...notes.map((entry) => entry.path),
-    ...raws.map((entry) => entry.path),
-  ]);
   const deletePaths = new Set<string>();
   for (const path of await listVaultDeleted(bucket, owner, repoName)) {
     if (conflictPaths.has(path) || r2Paths.has(path)) {
