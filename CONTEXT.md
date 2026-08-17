@@ -84,6 +84,10 @@ _Avoid_: 手動同期 (UI 層では manual を使わない)
 Vault を初めて開いたときに実行される同期。GitHub から R2 へ全量を取り込み、完了後に Vault を表示する。
 _Avoid_: 初回取り込み, initial import
 
+**同期オーバーレイ**:
+同期実行中に Vault 画面全体を覆い、編集をブロックして同期の進捗を表示するモーダル。同期の完了と同時に解除される。
+_Avoid_: 同期モーダル, blocking overlay
+
 **遅延キャッシュ**:
 読み取り時に R2 へ存在しない Note/Attachment を GitHub から取得し、R2 に書き戻す動作。
 _Avoid_: フォールバック (fallback は不可逆な縮退を連想させる)
