@@ -36,6 +36,7 @@ import {
   deleteCachedRaw,
   isVaultDeleted,
   markVaultDeleted,
+  markVaultDirty,
   readCachedNote,
   readVaultMeta,
   readVaultTree,
@@ -376,6 +377,7 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
       sha: await gitBlobShaHex(new TextEncoder().encode('# Local\n')),
       content: '# Local\n',
     });
+    await markVaultDirty(bucket, OWNER, REPO, 'local.md');
     // ツリーキャッシュにもローカル追加（sha: null）を反映しておく
     const tree = await readVaultTree(bucket, OWNER, REPO);
     if (tree) {
@@ -418,6 +420,7 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
       sha: await gitBlobShaHex(new TextEncoder().encode('# A edited\n')),
       content: '# A edited\n',
     });
+    await markVaultDirty(bucket, OWNER, REPO, 'a.md');
     await deleteCachedNote(bucket, OWNER, REPO, 'b.md');
     await applyVaultTreeChanges(bucket, OWNER, REPO, [{ op: 'remove', path: 'b.md' }]);
     await markVaultDeleted(bucket, OWNER, REPO, 'b.md');
