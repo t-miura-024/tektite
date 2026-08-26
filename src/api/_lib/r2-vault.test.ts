@@ -1,28 +1,25 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  deleteCachedNote,
+  listCachedNotes,
+  readCachedNote,
+  readVaultMeta,
+  readVaultTree,
+  vaultTreeKey,
+  writeCachedNote,
+  writeVaultMeta,
+  writeVaultTree,
+} from './r2-vault';
+import { applyVaultTreeChanges } from './r2-vault-tree-apply';
+import { deleteCachedRaw, readCachedRaw, vaultRawKey, writeCachedRaw } from './r2-vault-assets';
+
 /**
  * R2 Vault ストレージ層（r2-vault.ts）のユニットテスト。
  *
  * メモリ上のフェイク R2 バケットに対して、キー設計（meta / tree / notes /
  * raw）と読み書き・一覧の動作を検証する。
  */
-
-import { describe, expect, it } from 'vitest';
-
-import {
-  applyVaultTreeChanges,
-  deleteCachedNote,
-  deleteCachedRaw,
-  listCachedNotes,
-  readCachedNote,
-  readCachedRaw,
-  readVaultMeta,
-  readVaultTree,
-  vaultRawKey,
-  vaultTreeKey,
-  writeCachedNote,
-  writeCachedRaw,
-  writeVaultMeta,
-  writeVaultTree,
-} from './r2-vault';
 
 /** テスト用のメモリ R2 バケット（workers-types の R2Bucket の最小フェイク） */
 class FakeR2Bucket {
@@ -62,18 +59,18 @@ class FakeR2Bucket {
 }
 
 class FakeR2ObjectBody {
-  constructor(private readonly data: { body: ArrayBuffer; metadata?: Record<string, string> }) {}
+  constructor(private readonly object: { body: ArrayBuffer; metadata?: Record<string, string> }) {}
 
   get customMetadata(): Record<string, string> {
-    return this.data.metadata ?? {};
+    return this.object.metadata ?? {};
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {
-    return this.data.body;
+    return this.object.body;
   }
 
   async json(): Promise<unknown> {
-    return JSON.parse(new TextDecoder().decode(this.data.body));
+    return JSON.parse(new TextDecoder().decode(this.object.body));
   }
 }
 
@@ -202,7 +199,11 @@ describe('r2-vault ストレージ層', () => {
         { path: 'daily/b.md', note: { sha: 'sha-b', content: 'B' } },
       ]);
       // meta / tree キーは prefix が違うため含まれない
-      expect(notes.map((entry) => entry.path)).not.toContain('meta');
+      const paths: string[] = [];
+      for (const entry of notes) {
+        paths.push(entry.path);
+      }
+      expect(paths).not.toContain('meta');
     });
 
     it('listCachedNotes は Vault ごとに分離される', async () => {

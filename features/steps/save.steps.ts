@@ -85,6 +85,7 @@ When(
     expect(typeof currentBody.sha).toBe('string');
 
     const updated = await page.request.put(noteUrl, {
+      // oxlint-disable-next-line id-denylist -- Playwright request API 仕様 (`data` キー)
       data: {
         content: btoa(content),
         sha: currentBody.sha,

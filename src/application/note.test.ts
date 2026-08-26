@@ -2,17 +2,19 @@ import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  NoteFetchError,
+  isNoteFetchError,
+  isNoteSaveError,
   NoteGateway,
-  NoteSaveError,
+  noteFetchError,
+  noteSaveError,
   openNote,
   saveNoteContent,
-} from '@/application/note';
-import type {
-  NoteContent,
-  NoteIndexData,
-  NoteSaveRequest,
-  NoteSaveResult,
+  type NoteContent,
+  type NoteFetchError,
+  type NoteIndexData,
+  type NoteSaveError,
+  type NoteSaveRequest,
+  type NoteSaveResult,
 } from '@/application/note';
 import type { VaultRef } from '@/domain/vault';
 
@@ -26,11 +28,11 @@ const INDEX_DATA: NoteIndexData = {
   notes: [NOTE],
 };
 
-interface GatewayStub {
+type GatewayStub = {
   gateway: NoteGateway;
   fetchNoteMock: ReturnType<typeof vi.fn>;
   saveNoteMock: ReturnType<typeof vi.fn>;
-}
+};
 
 function createGatewayStub(note: NoteContent): GatewayStub {
   const fetchNote = vi
@@ -74,7 +76,7 @@ describe('note ユースケース', () => {
     const gateway: NoteGateway = {
       fetchNote: vi
         .fn<(ref: VaultRef, notePath: string) => Effect.Effect<NoteContent, NoteFetchError>>()
-        .mockReturnValue(Effect.fail(new NoteFetchError('not_found', 'ノートが見つかりません。'))),
+        .mockReturnValue(Effect.fail(noteFetchError('not_found', 'ノートが見つかりません。'))),
       fetchAllNotes: vi.fn(),
       saveNote: vi.fn(),
       commitChanges: vi.fn(),
@@ -84,7 +86,7 @@ describe('note ユースケース', () => {
     );
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(NoteFetchError);
+      expect(isNoteFetchError(result.left)).toBe(true);
       expect(result.left.kind).toBe('not_found');
     }
   });
@@ -128,7 +130,7 @@ describe('note ユースケース', () => {
       saveNote: vi
         .fn()
         .mockReturnValue(
-          Effect.fail(new NoteSaveError('conflict', 'リモートの内容が変更されていました。')),
+          Effect.fail(noteSaveError('conflict', 'リモートの内容が変更されていました。')),
         ),
       commitChanges: vi.fn(),
     };
@@ -142,7 +144,7 @@ describe('note ユースケース', () => {
     );
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(NoteSaveError);
+      expect(isNoteSaveError(result.left)).toBe(true);
       expect(result.left.kind).toBe('conflict');
     }
   });

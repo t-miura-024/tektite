@@ -8,7 +8,7 @@
  */
 /// <reference types="@cloudflare/workers-types" />
 
-interface Env {
+type Env = {
   /** OAuth App の client ID（vars） */
   GITHUB_CLIENT_ID?: string;
   /** OAuth App の client secret（secret） */
@@ -43,4 +43,4 @@ interface Env {
   TOKEN_KV?: KVNamespace;
   /** Vault 実体ストレージ（R2）。M3 の永続キャッシュで使用 */
   VAULT_BUCKET?: R2Bucket;
-}
+};

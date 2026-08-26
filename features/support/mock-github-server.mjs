@@ -215,12 +215,24 @@ const HEAD_COMMITS = new Map();
 /** パス拡張子から Content-Type を推測する（画像 round-trip の raw 配信用） */
 function contentTypeForPath(path) {
   const lower = path.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.svg')) return 'image/svg+xml';
-  if (lower.endsWith('.md')) return 'text/markdown';
+  if (lower.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (lower.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  if (lower.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (lower.endsWith('.svg')) {
+    return 'image/svg+xml';
+  }
+  if (lower.endsWith('.md')) {
+    return 'text/markdown';
+  }
   return 'application/octet-stream';
 }
 
@@ -231,11 +243,11 @@ function sendJson(res, status, body) {
 
 function readBody(req) {
   return new Promise((resolve) => {
-    let data = '';
+    let accumulated = '';
     req.on('data', (chunk) => {
-      data += chunk;
+      accumulated += chunk;
     });
-    req.on('end', () => resolve(data));
+    req.on('end', () => resolve(accumulated));
   });
 }
 

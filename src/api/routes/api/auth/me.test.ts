@@ -14,22 +14,18 @@ const mocks = vi.hoisted(() => ({
   clearSessionCookie: vi.fn(),
 }));
 
-vi.mock('@/api/_lib/env', () => {
-  class AuthConfigError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'AuthConfigError';
-    }
-  }
-  return { AuthConfigError, resolveAuthConfig: mocks.resolveAuthConfig };
-});
+vi.mock('@/api/_lib/env', () => ({
+  isAuthConfigError: (error: unknown): boolean =>
+    error instanceof Error && error.name === 'AuthConfigError',
+  resolveAuthConfig: mocks.resolveAuthConfig,
+}));
 
 vi.mock('@/api/_lib/session', () => ({
   clearSessionCookie: mocks.clearSessionCookie,
   readAccessToken: mocks.readAccessToken,
 }));
 
-import { AuthConfigError } from '@/api/_lib/env';
+import { makeNamedError } from '@/api/_lib/error-object';
 import { handleMeGet } from './me';
 
 const PAT = 'github_pat_test_token';
@@ -43,7 +39,7 @@ function getUserContext(patch: Record<string, string | undefined> = {}) {
       'GITHUB_PERSONAL_TOKEN' in patch ? patch.GITHUB_PERSONAL_TOKEN : undefined,
     GITHUB_CLIENT_ID: 'GITHUB_CLIENT_ID' in patch ? patch.GITHUB_CLIENT_ID : undefined,
     GITHUB_CLIENT_SECRET: 'GITHUB_CLIENT_SECRET' in patch ? patch.GITHUB_CLIENT_SECRET : undefined,
-    SESSION_SECRET: SESSION_SECRET,
+    SESSION_SECRET,
     OAUTH_REDIRECT_URI: 'OAUTH_REDIRECT_URI' in patch ? patch.OAUTH_REDIRECT_URI : undefined,
     GITHUB_API_BASE_URL: API_BASE_URL,
   } as unknown as Env;
@@ -127,7 +123,7 @@ describe('GET /api/auth/me (PAT モード)', () => {
 describe('GET /api/auth/me (OAuth モード)', () => {
   it('OAuth 変数が無ければ従来どおり 401 { authenticated: false }', async () => {
     mocks.resolveAuthConfig.mockImplementation(() => {
-      throw new AuthConfigError('環境変数 GITHUB_CLIENT_ID が設定されていません');
+      throw makeNamedError('AuthConfigError', '環境変数 GITHUB_CLIENT_ID が設定されていません');
     });
 
     const response = await handleMeGet(getUserContext());

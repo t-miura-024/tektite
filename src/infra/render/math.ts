@@ -14,7 +14,6 @@
 
 import { escapeHtml } from '@/infra/render/escape';
 
-/** 数式プレースホルダーの開き/閉じ文字 */
 const PLACEHOLDER_OPEN = '\uE000';
 const PLACEHOLDER_CLOSE = '\uE001';
 
@@ -23,33 +22,43 @@ export function mathPlaceholder(index: number): string {
 }
 
 /** 抽出された数式 1 件 */
-export interface MathItem {
+export type MathItem = {
   readonly kind: 'inline' | 'block';
   readonly tex: string;
-}
+};
 
-export interface ExtractMathResult {
+export type ExtractMathResult = {
   /** 数式をプレースホルダーに置き換えた本文 */
   readonly text: string;
   readonly items: readonly MathItem[];
-}
+};
 
 /** 動的 import した KaTeX の必要最小限インターフェース（UMD 型の回避用） */
-export interface KatexRenderer {
+export type KatexRenderer = {
   readonly renderToString: (
     tex: string,
     options?: { displayMode?: boolean; throwOnError?: boolean },
   ) => string;
-}
+};
 
 let katexPromise: Promise<KatexRenderer | null> | null = null;
+
+/** 候補値が KaTeX レンダラーの形をしているか（UMD / ESM 両対応の実行時判定） */
+function isKatexRenderer(value: unknown): value is KatexRenderer {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'renderToString' in value &&
+    typeof value.renderToString === 'function'
+  );
+}
 
 /** KaTeX を動的 import する（初回のみ。失敗時は null でキャッシュ） */
 export function loadKatex(): Promise<KatexRenderer | null> {
   katexPromise ??= import('katex')
     .then((mod) => {
-      const renderer = (mod as unknown as { default?: KatexRenderer }).default;
-      return renderer?.renderToString ? renderer : null;
+      const candidate: unknown = 'default' in mod ? mod.default : mod;
+      return isKatexRenderer(candidate) ? candidate : null;
     })
     .catch(() => null);
   return katexPromise;
@@ -61,7 +70,10 @@ const FENCE_OPEN_RE = /^(`{3,}|~{3,})(.*)$/;
 /** フェンス閉じ行かどうか（同じ char が open の長さ以上続き、残りは空白のみ） */
 function isFenceClose(line: string, fence: { char: string; len: number }): boolean {
   let run = 0;
-  while (line[run] === fence.char) {
+  for (const current of line) {
+    if (current !== fence.char) {
+      break;
+    }
     run += 1;
   }
   return run >= fence.len && line.slice(run).trim() === '';
@@ -88,21 +100,57 @@ function findInlineClose(line: string, open: number): number {
   return -1;
 }
 
+/** 複数行ブロック数式の収集結果（tex / 閉じ行の残りテキスト / 閉じ行位置） */
+type MultiLineBlock = {
+  readonly closed: boolean;
+  readonly tex: string;
+  readonly remainder: string;
+  readonly closeIndex: number;
+};
+
+/** 開き `$$` の行 rest から、後続行を閉じ `$$` まで収集する */
+function collectMultiLineBlock(
+  lines: readonly string[],
+  startIndex: number,
+  rest: string,
+): MultiLineBlock {
+  let tex = rest;
+  for (let k = startIndex; k < lines.length; k += 1) {
+    const next = lines[k] ?? '';
+    const closePosition = next.indexOf('$$');
+    if (closePosition !== -1) {
+      return {
+        closed: true,
+        tex: `${tex}\n${next.slice(0, closePosition)}`,
+        remainder: next.slice(closePosition + 2),
+        closeIndex: k,
+      };
+    }
+    tex += `\n${next}`;
+  }
+  return { closed: false, tex, remainder: '', closeIndex: lines.length - 1 };
+}
+
+/** 行スキャンの結果（複数行ブロック数式では複数行を出力・消費する） */
+type LineScanResult = {
+  readonly outputs: readonly (string | null)[];
+  /** 次に処理する行インデックス */
+  readonly nextIndex: number;
+};
+
 /**
  * 本文から数式を抽出してプレースホルダーに置き換える。
- * - `$$...$$` はブロック（行をまたげる）。閉じがない場合は原文のまま
- * - `$...$` はインライン。開き `$` の直後が空白・`$$`・行末の場合は数式にしない
- * - フェンスドコード内の `$` は数式にしない（インラインコードは呼び出し側で
- *   マスク済みの想定。ここではフェンスのみ自前で追跡する）
+ * `$$...$$` はブロック（行をまたげる。閉じがなければ原文のまま）、`$...$` は
+ * インライン（開き `$` の直後が空白・`$$`・行末なら数式にしない）。
+ * フェンスドコード内の `$` は数式にしない。
  */
 export function extractMath(source: string): ExtractMathResult {
   const items: MathItem[] = [];
   const lines = source.split('\n');
   const out: string[] = [];
   let fence: { char: string; len: number } | null = null;
-  let i = 0;
 
-  while (i < lines.length) {
+  for (let i = 0; i < lines.length;) {
     const line = lines[i] ?? '';
     if (fence !== null) {
       out.push(line);
@@ -119,85 +167,111 @@ export function extractMath(source: string): ExtractMathResult {
       i += 1;
       continue;
     }
-
-    // 行内スキャン
-    let j = 0;
-    let lineOut = '';
-    while (j < line.length) {
-      const ch = line[j] ?? '';
-      if (ch === '\\') {
-        lineOut += ch + (line[j + 1] ?? '');
-        j += 2;
-        continue;
+    const scanned = scanLineMath(line, lines, i, items);
+    for (const output of scanned.outputs) {
+      if (output !== null) {
+        out.push(output);
       }
-      if (ch === '$') {
-        // ブロック数式 $$...$$
-        if (line[j + 1] === '$') {
-          const rest = line.slice(j + 2);
-          const closeSameLine = rest.indexOf('$$');
-          if (closeSameLine !== -1) {
-            items.push({ kind: 'block', tex: rest.slice(0, closeSameLine) });
-            lineOut += mathPlaceholder(items.length - 1);
-            j = j + 2 + closeSameLine + 2;
-            continue;
-          }
-          // 行をまたぐブロック数式: 後続行を閉じ `$$` まで収集する
-          let tex = rest;
-          let remainder = '';
-          let k = i + 1;
-          let closed = false;
-          for (; k < lines.length; k += 1) {
-            const next = lines[k] ?? '';
-            const closeIndex = next.indexOf('$$');
-            if (closeIndex !== -1) {
-              tex += `\n${next.slice(0, closeIndex)}`;
-              remainder = next.slice(closeIndex + 2);
-              k += 1;
-              closed = true;
-              break;
-            }
-            tex += `\n${next}`;
-          }
-          if (closed) {
-            items.push({ kind: 'block', tex });
-            lineOut += mathPlaceholder(items.length - 1);
-            // 収集した行（閉じ行含む）は出力しない。閉じ行の残りは次の行として
-            // 出力する（数式と同じ行に続くテキストを失わないため）。
-            // ループ末尾の i += 1 と相殺するため k - 1 にする
-            if (remainder !== '') {
-              out.push(remainder);
-            }
-            i = k - 1;
-            j = line.length;
-            continue;
-          }
-          lineOut += '$$';
-          j += 2;
-          continue;
-        }
-        // インライン数式 $...$
-        const next = line[j + 1] ?? '';
-        if (next !== ' ' && next !== '' && !/[\p{N}]/u.test(next)) {
-          const close = findInlineClose(line, j);
-          if (close !== -1) {
-            items.push({ kind: 'inline', tex: line.slice(j + 1, close) });
-            lineOut += mathPlaceholder(items.length - 1);
-            j = close + 1;
-            continue;
-          }
-        }
-        lineOut += '$';
-        j += 1;
-        continue;
-      }
-      lineOut += ch;
-      j += 1;
     }
-    out.push(lineOut);
-    i += 1;
+    // nextIndex は「処理した最後の行」。次の行から再開する
+    i = scanned.nextIndex + 1;
   }
 
   return { text: out.join('\n'), items };
+}
+
+/** 1 行分の数式走査。nextIndex は消費した最後の行インデックス（複数行消費に対応） */
+function scanLineMath(
+  line: string,
+  lines: readonly string[],
+  lineIndex: number,
+  items: MathItem[],
+): LineScanResult {
+  let lineOut = '';
+  for (let j = 0; j < line.length;) {
+    const ch = line[j] ?? '';
+    if (ch === '\\') {
+      lineOut += ch + (line[j + 1] ?? '');
+      j += 2;
+      continue;
+    }
+    if (ch !== '$') {
+      lineOut += ch;
+      j += 1;
+      continue;
+    }
+    if (line[j + 1] === '$') {
+      const block = scanBlockMath(line, lines, lineIndex, j, items);
+      if (block !== null) {
+        return block;
+      }
+      // 閉じのない `$$` は原文のまま出す
+      lineOut += '$$';
+      j += 2;
+      continue;
+    }
+    const inlineResult = scanInlineMath(line, j, items);
+    if (inlineResult !== null) {
+      lineOut += mathPlaceholder(inlineResult.placeholderIndex);
+      j = inlineResult.nextCharIndex;
+      continue;
+    }
+    lineOut += '$';
+    j += 1;
+  }
+  return { outputs: [lineOut], nextIndex: lineIndex };
+}
+
+/** ブロック数式 `$$...$$` を処理する。行をまたぐ場合は後続行を消費する */
+function scanBlockMath(
+  line: string,
+  lines: readonly string[],
+  lineIndex: number,
+  openIndex: number,
+  items: MathItem[],
+): LineScanResult | null {
+  const rest = line.slice(openIndex + 2);
+  const closeSameLine = rest.indexOf('$$');
+  const prefix = line.slice(0, openIndex);
+  if (closeSameLine !== -1) {
+    items.push({ kind: 'block', tex: rest.slice(0, closeSameLine) });
+    const suffix = rest.slice(closeSameLine + 2);
+    return {
+      outputs: [`${prefix}${mathPlaceholder(items.length - 1)}${suffix}`],
+      nextIndex: lineIndex,
+    };
+  }
+  const collected = collectMultiLineBlock(lines, lineIndex + 1, rest);
+  if (!collected.closed) {
+    return null;
+  }
+  items.push({ kind: 'block', tex: collected.tex });
+  // 収集した行（閉じ行含む）は出力しない。開き行の前半 + プレースホルダーと、
+  // 閉じ行の残り（次の行として出力）だけを出力する
+  const outputs =
+    collected.remainder === ''
+      ? [`${prefix}${mathPlaceholder(items.length - 1)}`, null]
+      : [`${prefix}${mathPlaceholder(items.length - 1)}`, collected.remainder];
+  // 閉じ行までを消費する（呼び出し側が次の行から再開する）
+  return { outputs, nextIndex: collected.closeIndex };
+}
+
+/** インライン数式 `$...$` を処理する。数式でなければ null */
+function scanInlineMath(
+  line: string,
+  openIndex: number,
+  items: MathItem[],
+): { placeholderIndex: number; nextCharIndex: number } | null {
+  const next = line[openIndex + 1] ?? '';
+  if (next === ' ' || next === '' || /[\p{N}]/u.test(next)) {
+    return null;
+  }
+  const close = findInlineClose(line, openIndex);
+  if (close === -1) {
+    return null;
+  }
+  items.push({ kind: 'inline', tex: line.slice(openIndex + 1, close) });
+  return { placeholderIndex: items.length - 1, nextCharIndex: close + 1 };
 }
 
 /** 抽出した数式を KaTeX HTML 列に変換する（katex が使えない場合はフォールバック） */
@@ -206,8 +280,9 @@ export function renderMathItems(
   katex: KatexRenderer | null,
 ): readonly string[] {
   return items.map((item) => {
+    const fallback = `<code class="math-fallback">${escapeHtml(item.tex)}</code>`;
     if (katex === null) {
-      return `<code class="math-fallback">${escapeHtml(item.tex)}</code>`;
+      return fallback;
     }
     try {
       return katex.renderToString(item.tex, {
@@ -215,7 +290,7 @@ export function renderMathItems(
         throwOnError: false,
       });
     } catch {
-      return `<code class="math-fallback">${escapeHtml(item.tex)}</code>`;
+      return fallback;
     }
   });
 }

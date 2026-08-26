@@ -3,22 +3,71 @@
   "plugins": ["react", "typescript", "unicorn", "import"],
   "categories": {
     "correctness": "error",
-    "suspicious": "warn",
-    "pedantic": "off",
-    "perf": "warn",
-    "style": "off",
-    "restriction": "off",
-    "nursery": "off"
+    "suspicious": "warn"
   },
   "rules": {
     "react/react-in-jsx-scope": "off",
-    "unicorn/require-module-specifiers": "off",
     "import/no-unassigned-import": [
       "error",
       {
         "allow": ["**/*.css"]
       }
-    ]
+    ],
+    "no-console": "error",
+    "eqeqeq": ["error", "always"],
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-throw-literal": "error",
+    "no-duplicate-imports": [
+      "error",
+      {
+        "includeExports": true
+      }
+    ],
+    "object-shorthand": ["error", "always"],
+    "no-param-reassign": [
+      "error",
+      {
+        "props": true
+      }
+    ],
+    "curly": ["error", "all"],
+    "id-denylist": ["error", "data", "info", "manager", "handler", "utils", "helper", "common"],
+    "max-lines": [
+      "error",
+      {
+        "max": 300,
+        "skipBlankLines": false,
+        "skipComments": false
+      }
+    ],
+    "max-lines-per-function": [
+      "error",
+      {
+        "max": 80,
+        "skipBlankLines": false,
+        "skipComments": false
+      }
+    ],
+    "max-depth": ["error", 4],
+    "max-nested-callbacks": ["error", 3],
+    "oxc/no-barrel-file": "error",
+    "import/no-default-export": "error",
+    "unicorn/filename-case": "error",
+    "typescript/consistent-type-assertions": "off",
+    "typescript/consistent-type-definitions": "off",
+    "typescript/no-explicit-any": "off",
+    "typescript/no-non-null-assertion": "off",
+    "typescript/explicit-function-return-type": "off",
+    "typescript/explicit-module-boundary-types": "off",
+    "typescript/no-floating-promises": "off",
+    "typescript/no-misused-promises": "off",
+    "typescript/require-await": "off",
+    "typescript/no-unsafe-argument": "off",
+    "typescript/no-unsafe-assignment": "off",
+    "typescript/no-unsafe-call": "off",
+    "typescript/no-unsafe-member-access": "off",
+    "typescript/no-unsafe-return": "off"
   },
   "overrides": [
     {
@@ -33,10 +82,84 @@
               "react-dom",
               "react-dom/*",
               "@cloudflare/*",
-              "wrangler"
+              "wrangler",
+              "@/application",
+              "@/application/**",
+              "@/infra",
+              "@/infra/**",
+              "@/api",
+              "@/api/**",
+              "@/ui",
+              "@/ui/**",
+              "@/composition",
+              "**/application/**",
+              "**/infra/**",
+              "**/api/**",
+              "**/ui/**"
             ]
           }
         ]
+      }
+    },
+    {
+      "files": ["src/application/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              "@/infra",
+              "@/infra/**",
+              "@/api",
+              "@/api/**",
+              "@/ui",
+              "@/ui/**",
+              "@/composition",
+              "**/infra/**",
+              "**/api/**",
+              "**/ui/**"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/infra/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              "@/api",
+              "@/api/**",
+              "@/ui",
+              "@/ui/**",
+              "@/composition",
+              "**/api/**",
+              "**/ui/**"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/api/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              "@/infra",
+              "@/infra/**",
+              "@/ui",
+              "@/ui/**",
+              "@/composition",
+              "**/infra/**",
+              "**/ui/**"
+            ]
+          }
+        ],
+        "no-console": "warn"
       }
     },
     {
@@ -45,11 +168,59 @@
         "no-restricted-imports": [
           "error",
           {
-            "patterns": ["@/infra", "**/infra/**"]
+            "patterns": ["@/infra", "@/infra/**", "@/api", "@/api/**", "**/infra/**", "**/api/**"]
           }
         ]
       }
+    },
+    {
+      "files": ["src/composition.ts"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": ["**/*.tsx"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 400
+          }
+        ]
+      }
+    },
+    {
+      "files": ["**/*.test.*", "**/*.spec.*", "features/**"],
+      "rules": {
+        "max-lines": "off",
+        "max-lines-per-function": "off",
+        "typescript/no-extraneous-class": "off",
+        "no-console": "off"
+      }
+    },
+    {
+      "files": ["src/api/server.ts"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": ["vite.config.ts", "playwright.config.ts", "eslint.config.js"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
     }
   ],
-  "ignorePatterns": ["dist/", ".features-gen/", "playwright-report/", "test-results/", ".wrangler/"]
+  "ignorePatterns": [
+    "dist/",
+    ".features-gen/",
+    "playwright-report/",
+    "test-results/",
+    ".wrangler/",
+    "node_modules/",
+    ".tado/",
+    "coverage/",
+    "scripts/"
+  ]
 }

@@ -14,6 +14,7 @@
 
 import { Context, Effect } from 'effect';
 
+import { makeNamedError, isErrorNamed } from '@/application/error-object';
 import type { VaultRef } from '@/domain/vault';
 
 /** ノート取得エラーの種類（UI がメッセージとリトライ導線を選ぶ材料） */
@@ -25,25 +26,33 @@ export type NoteFetchErrorKind =
   | 'network';
 
 /** ノート取得の通信で発生するエラー */
-export class NoteFetchError extends Error {
+export type NoteFetchError = Error & {
   readonly kind: NoteFetchErrorKind;
+};
 
-  constructor(kind: NoteFetchErrorKind, message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'NoteFetchError';
-    this.kind = kind;
-  }
+/** NoteFetchError を生成するファクトリ */
+export function noteFetchError(
+  kind: NoteFetchErrorKind,
+  message: string,
+  options?: { cause?: unknown },
+): NoteFetchError {
+  return Object.assign(makeNamedError('NoteFetchError', message, options), { kind });
+}
+
+/** error が NoteFetchError かどうか */
+export function isNoteFetchError(error: unknown): error is NoteFetchError {
+  return isErrorNamed(error, 'NoteFetchError');
 }
 
 /** ノート取得の結果（本文 + 楽観ロック用 sha） */
-export interface NoteContent {
+export type NoteContent = {
   /** Vault ルートからのノートパス（/ 区切り） */
   readonly path: string;
   /** GitHub 上のファイル sha（保存時の楽観ロックに使う） */
   readonly sha: string;
   /** ノート本文（UTF-8 のテキスト） */
   readonly content: string;
-}
+};
 
 /** ノート保存エラーの種類（UI がトーストと Conflict 導線を選ぶ材料） */
 export type NoteSaveErrorKind =
@@ -55,18 +64,26 @@ export type NoteSaveErrorKind =
   | 'network';
 
 /** ノート保存の通信で発生するエラー */
-export class NoteSaveError extends Error {
+export type NoteSaveError = Error & {
   readonly kind: NoteSaveErrorKind;
+};
 
-  constructor(kind: NoteSaveErrorKind, message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'NoteSaveError';
-    this.kind = kind;
-  }
+/** NoteSaveError を生成するファクトリ */
+export function noteSaveError(
+  kind: NoteSaveErrorKind,
+  message: string,
+  options?: { cause?: unknown },
+): NoteSaveError {
+  return Object.assign(makeNamedError('NoteSaveError', message, options), { kind });
+}
+
+/** error が NoteSaveError かどうか */
+export function isNoteSaveError(error: unknown): error is NoteSaveError {
+  return isErrorNamed(error, 'NoteSaveError');
 }
 
 /** 保存の入力（楽観ロックの基準 sha は読込時のものを必ず渡す） */
-export interface NoteSaveInput {
+export type NoteSaveInput = {
   /** 保存する本文（UTF-8 のテキスト） */
   readonly content: string;
   /**
@@ -74,30 +91,30 @@ export interface NoteSaveInput {
    * コミットメッセージが `Create <ファイル名>` になり、PUT に sha を含めない。
    */
   readonly baseSha: string | null;
-}
+};
 
 /** ノート保存の結果（保存後のファイル sha。Conflict 解決後の再保存に使える） */
-export interface NoteSaveResult {
+export type NoteSaveResult = {
   readonly path: string;
   readonly sha: string;
-}
+};
 
 /** Vault 全ノートの一括取得データ（プロキシ /api/notes/:owner/:repo/all の応答） */
-export interface NoteIndexData {
+export type NoteIndexData = {
   readonly defaultBranch: string;
   readonly truncated: boolean;
   readonly notes: readonly NoteContent[];
-}
+};
 
 /**
  * ポートへの保存要求（コミットメッセージはユースケースが自動生成したもの）。
  * sha が null の場合は新規作成（Contents API の sha 省略）として扱う。
  */
-export interface NoteSaveRequest {
+export type NoteSaveRequest = {
   readonly content: string;
   readonly sha: string | null;
   readonly message: string;
-}
+};
 
 /**
  * 一括コミットの変更 1 件（M5: ファイル操作）。
@@ -121,18 +138,18 @@ export type FileChange =
   | { readonly op: 'copy'; readonly path: string; readonly to: string };
 
 /** 一括コミットの入力（changes を 1 コミットに束ねる） */
-export interface CommitChangesInput {
+export type CommitChangesInput = {
   readonly changes: readonly FileChange[];
   readonly message: string;
-}
+};
 
 /** 一括コミットの結果 */
-export interface CommitResult {
+export type CommitResult = {
   readonly owner: string;
   readonly name: string;
   readonly branch: string;
   readonly commitSha: string;
-}
+};
 
 /** 一括コミットエラーの種類（ノート保存と同じ kind 合併型） */
 export type FileCommitErrorKind =
@@ -144,21 +161,29 @@ export type FileCommitErrorKind =
   | 'network';
 
 /** 一括コミットの通信・検証で発生するエラー */
-export class FileCommitError extends Error {
+export type FileCommitError = Error & {
   readonly kind: FileCommitErrorKind;
+};
 
-  constructor(kind: FileCommitErrorKind, message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'FileCommitError';
-    this.kind = kind;
-  }
+/** FileCommitError を生成するファクトリ */
+export function fileCommitError(
+  kind: FileCommitErrorKind,
+  message: string,
+  options?: { cause?: unknown },
+): FileCommitError {
+  return Object.assign(makeNamedError('FileCommitError', message, options), { kind });
+}
+
+/** error が FileCommitError かどうか */
+export function isFileCommitError(error: unknown): error is FileCommitError {
+  return isErrorNamed(error, 'FileCommitError');
 }
 
 /**
  * ポート: ノート本文と sha の取得・保存（Effect Service）。
  * src/infra/github の NoteGatewayLive（Pages Functions 経由）が実装する。
  */
-export interface NoteGateway {
+export type NoteGateway = {
   readonly fetchNote: (
     ref: VaultRef,
     notePath: string,
@@ -177,7 +202,7 @@ export interface NoteGateway {
     ref: VaultRef,
     input: CommitChangesInput,
   ) => Effect.Effect<CommitResult, FileCommitError>;
-}
+};
 export const NoteGateway = Context.GenericTag<NoteGateway>('tektite/NoteGateway');
 
 /** ノートを開き、本文と sha を取得する */

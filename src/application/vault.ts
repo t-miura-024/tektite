@@ -11,8 +11,8 @@
 
 import { Context, Effect } from 'effect';
 
-import { buildVaultTree } from '@/domain/tree';
-import type { TreeEntry, VaultTree } from '@/domain/tree';
+import { makeNamedError, isErrorNamed } from '@/application/error-object';
+import { type TreeEntry, type VaultTree, buildVaultTree } from '@/domain/tree';
 import type { Vault, VaultRef } from '@/domain/vault';
 
 /** Vault 関連の取得エラーの種類（UI がメッセージとリトライ導線を選ぶ材料） */
@@ -24,25 +24,33 @@ export type VaultFetchErrorKind =
   | 'network';
 
 /** Vault 一覧 / ファイルツリー取得の通信で発生するエラー */
-export class VaultFetchError extends Error {
+export type VaultFetchError = Error & {
   readonly kind: VaultFetchErrorKind;
+};
 
-  constructor(kind: VaultFetchErrorKind, message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'VaultFetchError';
-    this.kind = kind;
-  }
+/** VaultFetchError を生成するファクトリ */
+export function vaultFetchError(
+  kind: VaultFetchErrorKind,
+  message: string,
+  options?: { cause?: unknown },
+): VaultFetchError {
+  return Object.assign(makeNamedError('VaultFetchError', message, options), { kind });
+}
+
+/** error が VaultFetchError かどうか */
+export function isVaultFetchError(error: unknown): error is VaultFetchError {
+  return isErrorNamed(error, 'VaultFetchError');
 }
 
 /** ツリー取得の生データ（ゲートウェイがプロキシから受け取る形式） */
-export interface VaultTreeData {
+export type VaultTreeData = {
   readonly defaultBranch: string;
   readonly truncated: boolean;
   readonly entries: readonly TreeEntry[];
-}
+};
 
 /** 初期同期（POST /api/vaults/:owner/:repo/sync）の結果 */
-export interface VaultSyncResult {
+export type VaultSyncResult = {
   readonly owner: string;
   readonly name: string;
   /** initialized: 初回同期が完了 / already_synced: 既に同期済み / synced: 差分同期完了 / syncing: まだ未処理のノートが残っている（再呼び出しで継続） */
@@ -60,10 +68,10 @@ export interface VaultSyncResult {
   readonly conflicts?: readonly VaultSyncConflict[];
   /** 残っている未処理の同期対象数（status: 'syncing' のみ。0 になるまで再呼び出し） */
   readonly remaining?: number;
-}
+};
 
 /** 同期衝突 1 件（プル時に GitHub 側の変更と R2 側のローカル保存が重なった Note） */
-export interface VaultSyncConflict {
+export type VaultSyncConflict = {
   readonly path: string;
   /** R2 側（ローカル保存）の内容 */
   readonly local: string;
@@ -71,10 +79,10 @@ export interface VaultSyncConflict {
   readonly remote: string;
   /** GitHub 側の blob sha（GitHub 側で削除された場合は null） */
   readonly remoteSha: string | null;
-}
+};
 
 /** 同期状態（GET /api/vaults/:owner/:repo/sync。完了条件 10 の表示用） */
-export interface VaultSyncStatus {
+export type VaultSyncStatus = {
   readonly owner: string;
   readonly name: string;
   /** 最終同期時刻（未同期 Vault は null） */
@@ -83,13 +91,13 @@ export interface VaultSyncStatus {
   readonly lastSyncError: string | null;
   /** 直近の同期失敗日時（null は失敗なし） */
   readonly lastFailedAt: string | null;
-}
+};
 
 /**
  * ポート: Vault 一覧とファイルツリーの取得（Effect Service）。
  * src/infra/github の VaultGatewayLive（Pages Functions 経由）が実装する。
  */
-export interface VaultGateway {
+export type VaultGateway = {
   readonly listVaults: () => Effect.Effect<readonly Vault[], VaultFetchError>;
   readonly fetchTree: (ref: VaultRef) => Effect.Effect<VaultTreeData, VaultFetchError>;
   /** 初期同期（GitHub → R2 の全量取り込み）。R2 同期済みなら即完了する */
@@ -104,7 +112,7 @@ export interface VaultGateway {
     path: string,
     resolution: 'overwrite' | 'adopt',
   ) => Effect.Effect<string, VaultFetchError>;
-}
+};
 export const VaultGateway = Context.GenericTag<VaultGateway>('tektite/VaultGateway');
 
 /** ログインユーザーの Vault 候補一覧を取得する */
@@ -118,12 +126,12 @@ export const listVaults: Effect.Effect<readonly Vault[], VaultFetchError, VaultG
 export const openVault = (ref: VaultRef): Effect.Effect<VaultTree, VaultFetchError, VaultGateway> =>
   Effect.gen(function* () {
     const gateway = yield* VaultGateway;
-    const data = yield* gateway.fetchTree(ref);
+    const treeData = yield* gateway.fetchTree(ref);
     return {
       ref,
-      defaultBranch: data.defaultBranch,
-      truncated: data.truncated,
-      root: buildVaultTree(data.entries),
+      defaultBranch: treeData.defaultBranch,
+      truncated: treeData.truncated,
+      root: buildVaultTree(treeData.entries),
     };
   });
 
@@ -135,12 +143,12 @@ export const openVault = (ref: VaultRef): Effect.Effect<VaultTree, VaultFetchErr
 const MAX_SYNC_ITERATIONS = 100;
 
 /** 同期の進捗通知（オーバーレイ表示用）。残件数の減りから概算する */
-export interface SyncProgress {
+export type SyncProgress = {
   /** 残っている未処理の同期対象数 */
   readonly remaining: number;
   /** 進捗率（0〜1）。初回の残件数を基準に概算する */
   readonly fraction: number;
-}
+};
 
 /**
  * 同期の進捗をコールバックへ通知するヘルパー。初回の残件数を基準に、

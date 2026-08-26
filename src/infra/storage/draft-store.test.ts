@@ -8,7 +8,14 @@
 import { Effect, Either } from 'effect';
 import { describe, expect, it } from 'vitest';
 
-import { DraftStore, DraftStoreError, clearDraft, loadDraft, saveDraft } from '@/application/draft';
+import {
+  isDraftStoreError,
+  type DraftStoreError,
+  clearDraft,
+  DraftStore,
+  loadDraft,
+  saveDraft,
+} from '@/application/draft';
 import type { VaultRef } from '@/domain/vault';
 import { createDraftStoreLive, type KeyValueStorage } from '@/infra/storage/draft-store';
 
@@ -77,7 +84,7 @@ describe('Draft ストレージ（localStorage 実装）', () => {
     );
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(DraftStoreError);
+      expect(isDraftStoreError(result.left)).toBe(true);
       expect(result.left.kind).toBe('quota');
     }
   });
@@ -92,7 +99,7 @@ describe('Draft ストレージ（localStorage 実装）', () => {
     );
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(DraftStoreError);
+      expect(isDraftStoreError(result.left)).toBe(true);
       expect(result.left.kind).toBe('unavailable');
     }
   });

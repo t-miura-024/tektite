@@ -13,10 +13,16 @@ import {
   buildImagePath,
   imageExtension,
   uploadImage,
+  type FileOperation,
 } from '@/application/file';
-import type { FileOperation } from '@/application/file';
-import { FileCommitError, NoteGateway } from '@/application/note';
-import type { CommitChangesInput, NoteIndexData } from '@/application/note';
+import {
+  fileCommitError,
+  isFileCommitError,
+  NoteGateway,
+  type CommitChangesInput,
+  type FileCommitError,
+  type NoteIndexData,
+} from '@/application/note';
 import { NoteIndexRegistry, createNoteIndexRegistry } from '@/application/note-index';
 import type { VaultRef } from '@/domain/vault';
 
@@ -48,9 +54,9 @@ const DATA: NoteIndexData = {
 /** ツリー由来の全ファイルパス（操作前） */
 const FILE_PATHS = ['a.md', 'b.md', 'attachments/logo.png'];
 
-interface FakeGateway extends NoteGateway {
+type FakeGateway = {
   readonly lastInput: () => CommitChangesInput | null;
-}
+} & NoteGateway;
 
 /** commitChanges の入力を記録するフェイクゲートウェイ */
 function fakeGateway(notes: NoteIndexData = DATA): FakeGateway {
@@ -126,7 +132,7 @@ describe('applyFileOperation', () => {
 
   it('create-note は既存パスなら失敗する', async () => {
     const { error } = await runOperationEither({ kind: 'create-note', path: 'a.md' });
-    expect(error).toBeInstanceOf(FileCommitError);
+    expect(isFileCommitError(error)).toBe(true);
     expect((error as FileCommitError).message).toBe('「a.md」は既に存在します。');
   });
 
@@ -321,7 +327,7 @@ describe('applyFileOperation', () => {
       { kind: 'rename-note', from: 'a.md', to: 'b.md' },
       FILE_PATHS,
     );
-    expect(error).toBeInstanceOf(FileCommitError);
+    expect(isFileCommitError(error)).toBe(true);
     expect(gateway.lastInput()).toBeNull();
   });
 
@@ -331,7 +337,7 @@ describe('applyFileOperation', () => {
       from: 'missing.md',
       to: 'x.md',
     });
-    expect(error).toBeInstanceOf(FileCommitError);
+    expect(isFileCommitError(error)).toBe(true);
     expect((error as FileCommitError).message).toBe('「missing.md」は存在しません。');
   });
 
@@ -349,7 +355,7 @@ describe('applyFileOperation', () => {
       ['projects/tektite.md', 'daily/tektite.md'],
       gateway,
     );
-    expect(error).toBeInstanceOf(FileCommitError);
+    expect(isFileCommitError(error)).toBe(true);
     expect((error as FileCommitError).message).toBe('移動先「daily/tektite.md」は既に存在します。');
     expect(captured.lastInput()).toBeNull();
   });
@@ -463,7 +469,7 @@ describe('applyFileOperation', () => {
   it('コミット失敗（conflict）は FileCommitError として伝播する', async () => {
     const gateway = fakeGateway();
     (gateway.commitChanges as ReturnType<typeof vi.fn>).mockReturnValue(
-      Effect.fail(new FileCommitError('conflict', 'ブランチが移動しました。')),
+      Effect.fail(fileCommitError('conflict', 'ブランチが移動しました。')),
     );
     const registry = createNoteIndexRegistry();
     const result = await Effect.runPromise(
@@ -477,7 +483,7 @@ describe('applyFileOperation', () => {
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(FileCommitError);
+      expect(isFileCommitError(result.left)).toBe(true);
       expect((result.left as FileCommitError).kind).toBe('conflict');
     }
   });
@@ -546,7 +552,7 @@ describe('uploadImage（画像アップロード）', () => {
       fileName: 'note.md',
       base64: PNG_BASE64,
     });
-    expect(error).toBeInstanceOf(FileCommitError);
+    expect(isFileCommitError(error)).toBe(true);
     expect((error as FileCommitError).message).toBe('画像ファイル名が不正です。');
     expect(gateway.lastInput()).toBeNull();
   });
@@ -556,7 +562,7 @@ describe('uploadImage（画像アップロード）', () => {
       fileName: 'image.png',
       base64: 'not base64!!!',
     });
-    expect(error).toBeInstanceOf(FileCommitError);
+    expect(isFileCommitError(error)).toBe(true);
     expect((error as FileCommitError).message).toBe('画像データが不正です。');
     expect(gateway.lastInput()).toBeNull();
   });
@@ -565,7 +571,7 @@ describe('uploadImage（画像アップロード）', () => {
     const registry = createNoteIndexRegistry();
     const gateway = fakeGateway();
     (gateway.commitChanges as ReturnType<typeof vi.fn>).mockReturnValue(
-      Effect.fail(new FileCommitError('conflict', 'ブランチが移動しました。')),
+      Effect.fail(fileCommitError('conflict', 'ブランチが移動しました。')),
     );
     const result = await Effect.runPromise(
       Effect.either(

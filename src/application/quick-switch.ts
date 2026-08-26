@@ -18,7 +18,7 @@ import { noteDisplayName } from '@/application/note-name';
 const MAX_RESULTS = 50;
 
 /** 検索結果 1 件 */
-export interface QuickSwitchHit {
+export type QuickSwitchHit = {
   readonly path: string;
   /** 拡張子を除いた表示名（ノート名） */
   readonly name: string;
@@ -26,7 +26,7 @@ export interface QuickSwitchHit {
   readonly positions: readonly number[];
   /** 一致対象: 表示名が優先。パスにしか現れない場合は 'path' */
   readonly matchedField: 'name' | 'path';
-}
+};
 
 /**
  * クエリが対象文字列の部分列として現れる最初の位置を返す（貪欲な左端一致）。

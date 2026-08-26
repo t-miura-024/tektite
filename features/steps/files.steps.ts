@@ -15,8 +15,7 @@
  * 回避）。
  */
 
-import { expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { createBdd } from 'playwright-bdd';
 
 const { When, Then } = createBdd();

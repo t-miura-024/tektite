@@ -9,7 +9,7 @@ import { createRoute } from 'honox/factory';
 
 import { clearSessionCookie } from '@/api/_lib/session';
 
-export async function handleLogoutPost(): Promise<Response> {
+export function handleLogoutPost(): Response {
   const headers = new Headers();
   headers.append('Set-Cookie', clearSessionCookie());
   return Response.json({ ok: true }, { headers });

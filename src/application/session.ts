@@ -13,10 +13,12 @@
 
 import { Context, Effect } from 'effect';
 
+import { makeNamedError, isErrorNamed } from '@/application/error-object';
+
 /** ログイン中の GitHub ユーザー */
-export interface SessionUser {
+export type SessionUser = {
   readonly login: string;
-}
+};
 
 /** 現在のセッション状態 */
 export type Session =
@@ -24,21 +26,29 @@ export type Session =
   | { readonly status: 'authenticated'; readonly user: SessionUser };
 
 /** セッション確認/ログアウトの通信で発生するエラー */
-export class SessionFetchError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'SessionFetchError';
-  }
+export type SessionFetchError = Error;
+
+/** SessionFetchError を生成するファクトリ */
+export function sessionFetchError(
+  message: string,
+  options?: { cause?: unknown },
+): SessionFetchError {
+  return makeNamedError('SessionFetchError', message, options);
+}
+
+/** error が SessionFetchError かどうか */
+export function isSessionFetchError(error: unknown): error is SessionFetchError {
+  return isErrorNamed(error, 'SessionFetchError');
 }
 
 /**
  * ポート: セッションの照会と破棄（Effect Service）。
  * src/infra/auth の SessionGatewayLive（Pages Functions 経由）が実装する。
  */
-export interface SessionGateway {
+export type SessionGateway = {
   readonly getCurrentSession: () => Effect.Effect<Session, SessionFetchError>;
   readonly logout: () => Effect.Effect<void, SessionFetchError>;
-}
+};
 export const SessionGateway = Context.GenericTag<SessionGateway>('tektite/SessionGateway');
 
 /** 現在のセッション状態を確認する（未ログインは anonymous、障害は SessionFetchError） */

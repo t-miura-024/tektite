@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import type { RenderNotationOptions } from '@/infra/render/render';
-import { renderNoteMarkdown } from '@/infra/render/render';
+import { renderNoteMarkdown, type RenderNotationOptions } from '@/infra/render/render';
 import { slugify } from '@/infra/render/slug';
-import { noteRoutePath } from '@/ui/router';
 
 const REF = { owner: 'octocat', name: 'notes' };
+
+/** ノートルートの期待値パス（ui/router.noteRoutePath 相当をテスト内で構築） */
+function noteRoutePathForTest(notePath: string): string {
+  const segments = notePath.split('/').map((segment) => encodeURIComponent(segment));
+  return `/${REF.owner}/${REF.name}/blob/${segments.join('/')}`;
+}
 
 /** テスト用のオプション（contents のキー = ファイルパス一覧として使う） */
 function optionsFor(contents: Record<string, string>, path = 'root.md'): RenderNotationOptions {
@@ -14,7 +18,7 @@ function optionsFor(contents: Record<string, string>, path = 'root.md'): RenderN
     contents: new Map(Object.entries(contents)),
     filePaths: Object.keys(contents),
     imageUrl: (p) => `/api/raw/${REF.owner}/${REF.name}/${encodeURIComponent(p)}`,
-    linkHref: (p, sub) => `${noteRoutePath(REF, p)}${sub !== null ? `#${slugify(sub)}` : ''}`,
+    linkHref: (p, sub) => `${noteRoutePathForTest(p)}${sub !== null ? `#${slugify(sub)}` : ''}`,
   };
 }
 

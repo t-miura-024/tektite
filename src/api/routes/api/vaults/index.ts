@@ -17,10 +17,10 @@
 
 import { createRoute } from 'honox/factory';
 
-import type { RouteContext } from '@/api/_lib/route-context';
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
 import { isVaultCandidate } from '@/domain/vault';
 import {
-  ProxyConfigError,
+  isProxyConfigError,
   authenticateRequest,
   githubApiFetch,
   githubUnreachable,
@@ -28,13 +28,27 @@ import {
   resolveProxyConfig,
 } from '@/api/_lib/github-proxy';
 
-interface GithubRepoPermissions {
+type GithubRepoPermissions = {
   admin?: boolean;
   push?: boolean;
   pull?: boolean;
+};
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
-interface GithubRepo {
+/** GitHub のリポジトリ応答 1 件かどうか（toVault が必要とするフィールドの最小検査） */
+function isGithubRepo(value: unknown): value is GithubRepo {
+  return (
+    isRecordObject(value) &&
+    typeof value.name === 'string' &&
+    isRecordObject(value.owner) &&
+    typeof value.owner.login === 'string'
+  );
+}
+
+type GithubRepo = {
   name?: unknown;
   full_name?: unknown;
   owner?: { login?: unknown };
@@ -45,9 +59,9 @@ interface GithubRepo {
   pushed_at?: unknown;
   updated_at?: unknown;
   permissions?: GithubRepoPermissions;
-}
+};
 
-interface VaultResponseBody {
+type VaultResponseBody = {
   owner: string;
   name: string;
   fullName: string;
@@ -55,7 +69,7 @@ interface VaultResponseBody {
   isPrivate: boolean;
   defaultBranch: string;
   updatedAt: string;
-}
+};
 
 const PER_PAGE = 100;
 const MAX_PAGES = 3;
@@ -89,12 +103,13 @@ async function fetchRepoPages(
   if (failure) {
     return failure;
   }
-  const body = (await response.json().catch(() => null)) as GithubRepo[] | null;
+  const body: unknown = await response.json().catch(() => null);
   if (!Array.isArray(body)) {
     return Response.json({ error: 'github_error' }, { status: 502 });
   }
-  accumulated.push(...body);
-  if (body.length < PER_PAGE) {
+  const repos = body.filter(isGithubRepo);
+  accumulated.push(...repos);
+  if (repos.length < PER_PAGE) {
     return accumulated;
   }
   return fetchRepoPages(config, token, page + 1, accumulated);
@@ -132,7 +147,7 @@ export async function handleVaultsGet(context: RouteContext): Promise<Response> 
   try {
     config = resolveProxyConfig(env);
   } catch (error) {
-    if (error instanceof ProxyConfigError) {
+    if (isProxyConfigError(error)) {
       return Response.json(
         { error: 'auth_not_configured', message: error.message },
         { status: 503 },
@@ -173,5 +188,5 @@ export async function handleVaultsGet(context: RouteContext): Promise<Response> 
 }
 
 export const GET = createRoute((c) =>
-  handleVaultsGet({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleVaultsGet(toRouteContext(c.env, c.req.raw, c.req.param())),
 );

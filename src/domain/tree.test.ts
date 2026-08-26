@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import type { TreeEntry } from '@/domain/tree';
-import { ancestorDirectoryPaths, buildVaultTree, isExcludedPath } from '@/domain/tree';
+import {
+  ancestorDirectoryPaths,
+  buildVaultTree,
+  isExcludedPath,
+  type TreeEntry,
+} from '@/domain/tree';
 
 describe('isExcludedPath', () => {
   it('隠れディレクトリ自体を除外する', () => {

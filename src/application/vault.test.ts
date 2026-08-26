@@ -2,13 +2,17 @@ import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  VaultFetchError,
-  VaultGateway,
   initializeVault,
+  isVaultFetchError,
   listVaults,
   openVault,
+  vaultFetchError,
+  VaultGateway,
+  type VaultFetchError,
+  type VaultSyncResult,
+  type VaultSyncStatus,
+  type VaultTreeData,
 } from '@/application/vault';
-import type { VaultSyncResult, VaultSyncStatus, VaultTreeData } from '@/application/vault';
 import type { Vault, VaultRef } from '@/domain/vault';
 
 const REF: VaultRef = { owner: 'octocat', name: 'notes' };
@@ -96,7 +100,7 @@ describe('vault ユースケース', () => {
       listVaults: vi
         .fn<() => Effect.Effect<readonly Vault[], VaultFetchError>>()
         .mockReturnValue(
-          Effect.fail(new VaultFetchError('rate_limited', 'レートリミットに達しました。')),
+          Effect.fail(vaultFetchError('rate_limited', 'レートリミットに達しました。')),
         ),
       fetchTree: vi.fn<(ref: VaultRef) => Effect.Effect<VaultTreeData, VaultFetchError>>(),
       initializeSync: vi.fn<(ref: VaultRef) => Effect.Effect<VaultSyncResult, VaultFetchError>>(),
@@ -116,7 +120,7 @@ describe('vault ユースケース', () => {
     );
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(VaultFetchError);
+      expect(isVaultFetchError(result.left)).toBe(true);
     }
   });
 

@@ -107,7 +107,9 @@ describe('authenticateRequest', () => {
     const result = await authenticateRequest(new Request('http://localhost/api/vaults'), config);
 
     expect(readAccessToken).not.toHaveBeenCalled();
-    if (!result.ok) throw new Error('expected ok');
+    if (!result.ok) {
+      throw new Error('expected ok');
+    }
     expect(result.token).toBe(PAT);
   });
 
@@ -118,7 +120,9 @@ describe('authenticateRequest', () => {
     const result = await authenticateRequest(new Request('http://localhost/api/vaults'), config);
 
     expect(readAccessToken).toHaveBeenCalledTimes(1);
-    if (!result.ok) throw new Error('expected ok');
+    if (!result.ok) {
+      throw new Error('expected ok');
+    }
     expect(result.token).toBe('cookie-token');
   });
 
@@ -128,7 +132,9 @@ describe('authenticateRequest', () => {
 
     const result = await authenticateRequest(new Request('http://localhost/api/vaults'), config);
 
-    if (result.ok) throw new Error('expected auth failure');
+    if (result.ok) {
+      throw new Error('expected auth failure');
+    }
     expect(result.response.status).toBe(401);
     expect(await result.response.json()).toEqual({ error: 'unauthenticated' });
   });

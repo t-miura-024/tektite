@@ -8,8 +8,12 @@
 import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
-import { NoteFetchError, NoteGateway } from '@/application/note';
-import type { NoteIndexData } from '@/application/note';
+import {
+  isNoteFetchError,
+  noteFetchError,
+  NoteGateway,
+  type NoteIndexData,
+} from '@/application/note';
 import {
   NoteIndexRegistry,
   applySavedNote,
@@ -167,9 +171,7 @@ describe('ノート索引レジストリ', () => {
   it('load はゲートウェイのエラーを NoteFetchError として伝播し、キャッシュしない', async () => {
     const registry = createNoteIndexRegistry();
     const gateway = mockGateway(
-      vi
-        .fn()
-        .mockReturnValue(Effect.fail(new NoteFetchError('rate_limited', 'レートリミットです。'))),
+      vi.fn().mockReturnValue(Effect.fail(noteFetchError('rate_limited', 'レートリミットです。'))),
     );
 
     const result = await Effect.runPromise(
@@ -178,7 +180,7 @@ describe('ノート索引レジストリ', () => {
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(NoteFetchError);
+      expect(isNoteFetchError(result.left)).toBe(true);
       expect(result.left.kind).toBe('rate_limited');
     }
     expect(registry.get(REF)).toBeNull();

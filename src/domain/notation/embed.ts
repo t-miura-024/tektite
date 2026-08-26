@@ -16,13 +16,13 @@
 import { parseNotation } from '@/domain/notation/parse';
 import { resolveNotePath } from '@/domain/notation/resolve';
 
-export interface EmbedExpansionOptions {
+export type EmbedExpansionOptions = {
   /** 展開する最大深さ（ルートを 0 とした上限。既定 8） */
   readonly maxDepth?: number;
-}
+};
 
 /** 展開された埋め込み 1 件（再帰ツリーの 1 ノード） */
-export interface EmbedExpansionNode {
+export type EmbedExpansionNode = {
   /** 展開されたノートのパス */
   readonly path: string;
   /** ルートからの深さ（ルートが 0。直接の埋め込みが 1） */
@@ -32,16 +32,16 @@ export interface EmbedExpansionNode {
   readonly to: number;
   /** このノートが持つ埋め込み（出現順） */
   readonly children: readonly EmbedExpansionNode[];
-}
+};
 
-export interface EmbedExpansionResult {
+export type EmbedExpansionResult = {
   /** ルートノートの本文中にある Note 埋め込み（出現順・解決できたもののみ） */
   readonly embeds: readonly EmbedExpansionNode[];
   /** 深さ上限に達して展開を打ち切ったパス */
   readonly truncated: readonly string[];
   /** 循環参照を検出して打ち切ったパス（祖先チェーン [..., 繰り返し先]） */
   readonly cycles: readonly string[][];
-}
+};
 
 const DEFAULT_MAX_DEPTH = 8;
 

@@ -12,8 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { createNoteSearcher } from '@/application/search';
-import type { SearchableNote } from '@/application/search';
+import { createNoteSearcher, type SearchableNote } from '@/application/search';
 
 /** 実 Vault らしい 1,000 ノート相当の合成データ（日本語本文 + タグ）を生成する */
 function buildVaultNotes(count: number): SearchableNote[] {

@@ -42,25 +42,17 @@
 
 import { createRoute } from 'honox/factory';
 
-import type { RouteContext } from '@/api/_lib/route-context';
-import { isValidGitHubName } from '@/domain/vault';
-import { ProxyConfigError, authenticateRequest, resolveProxyConfig } from '@/api/_lib/github-proxy';
-import { commitChangesToGitHub } from '@/api/_lib/github-commit';
-import type { ParsedChange } from '@/api/_lib/github-commit';
-import { sha256Hex } from '@/api/_lib/content-hash';
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
+import { commitChangesToGitHub, type ParsedChange } from '@/api/_lib/github-commit';
 import {
-  applyVaultTreeChanges,
-  deleteCachedNote,
-  deleteCachedRaw,
-  markVaultDeleted,
-  markVaultDirty,
-  readCachedNote,
-  readCachedRaw,
-  readVaultMeta,
-  writeCachedNote,
-  writeCachedRaw,
-} from '@/api/_lib/r2-vault';
-import type { VaultTreeChange } from '@/api/_lib/r2-vault';
+  authenticateRequest,
+  isProxyConfigError,
+  resolveProxyConfig,
+} from '@/api/_lib/github-proxy';
+import { sha256Hex } from '@/api/_lib/content-hash';
+import { isValidGitHubName } from '@/domain/vault';
+import { readVaultMeta } from '@/api/_lib/r2-vault';
+import { applyChangesToR2 } from '@/api/_lib/apply-r2-changes';
 
 /** 1 リクエストで受け付ける変更の上限（個人 Vault 規模の防衛線） */
 const MAX_CHANGES = 500;
@@ -88,12 +80,19 @@ function isValidBase64(value: string): boolean {
   return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
 }
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 /** ボディを検証し、変更列とメッセージへ正規化する（不正は null） */
 function parseCommitBody(raw: unknown): { changes: ParsedChange[]; message: string } | null {
   if (typeof raw !== 'object' || raw === null) {
     return null;
   }
-  const body = raw as { changes?: unknown; message?: unknown };
+  if (!('changes' in raw) || !('message' in raw)) {
+    return null;
+  }
+  const body = { changes: raw.changes, message: raw.message };
   if (typeof body.message !== 'string' || body.message.length === 0) {
     return null;
   }
@@ -109,7 +108,10 @@ function parseCommitBody(raw: unknown): { changes: ParsedChange[]; message: stri
     if (typeof item !== 'object' || item === null) {
       return null;
     }
-    const change = item as { op?: unknown; path?: unknown; to?: unknown; content?: unknown };
+    if (!isRecordObject(item)) {
+      return null;
+    }
+    const change = item;
     if (
       change.op !== 'create' &&
       change.op !== 'update' &&
@@ -145,167 +147,6 @@ function parseCommitBody(raw: unknown): { changes: ParsedChange[]; message: stri
   return { changes, message: body.message };
 }
 
-/** base64 文字列を UTF-8 テキストに復号する（ノート本文用） */
-function decodeBase64Content(encoded: string): string {
-  const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-/** base64 文字列をバイト列に復号する（添付バイナリ用） */
-function decodeBase64Bytes(encoded: string): Uint8Array {
-  return Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
-}
-
-/** パスがノート（Markdown）かどうか。ノート以外は添付（raw）として扱う */
-function isNotePath(path: string): boolean {
-  return path.endsWith('.md');
-}
-
-/** 添付の拡張子から Content-Type を推測する（画像アップロードの規約に合わせる） */
-function inferContentType(path: string): string {
-  const dot = path.lastIndexOf('.');
-  if (dot < 0 || dot === path.length - 1) {
-    return 'application/octet-stream';
-  }
-  switch (path.slice(dot + 1).toLowerCase()) {
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'gif':
-      return 'image/gif';
-    case 'webp':
-      return 'image/webp';
-    case 'bmp':
-      return 'image/bmp';
-    case 'avif':
-      return 'image/avif';
-    case 'svg':
-      return 'image/svg+xml';
-    default:
-      return 'application/octet-stream';
-  }
-}
-
-/**
- * 変更列を R2 へ適用する（初期同期済み Vault の R2 先行パス）。
- * 変更は順に適用され、同一パスの後続変更が勝つ。move / copy は元パスの
- * 種別（notes / raw）に応じて本文・Content-Type を引き継ぐ。
- */
-async function applyChangesToR2(
-  bucket: R2Bucket,
-  owner: string,
-  repoName: string,
-  changes: readonly ParsedChange[],
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly response: Response }> {
-  const treeChanges: VaultTreeChange[] = [];
-  for (const change of changes) {
-    // oxlint-disable-next-line no-await-in-loop -- 変更は順に適用する（同一パスの後勝ち・
-    // move 後の update 反映など GitHub の delta 適用と同じ順序依存がある）ため
-    if (change.op === 'create' || change.op === 'update') {
-      if (change.content === null) {
-        // parseCommitBody で保証されるため到達しない（型の防御線）
-        return { ok: false, response: Response.json({ error: 'invalid_body' }, { status: 400 }) };
-      }
-      if (isNotePath(change.path)) {
-        const content = decodeBase64Content(change.content);
-        // oxlint-disable-next-line no-await-in-loop -- ハッシュ計算（順次適用の意図）のため
-        const noteSha = await sha256Hex(content);
-        // oxlint-disable-next-line no-await-in-loop -- R2 書き込み（順次適用の意図）のため
-        await writeCachedNote(bucket, owner, repoName, change.path, {
-          sha: noteSha,
-          content,
-        });
-        // 未プッシュ変更（dirty）を記録する（同期プッシュが対象ノードだけ読めるように）
-        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
-        await markVaultDirty(bucket, owner, repoName, change.path);
-      } else {
-        const bytes = decodeBase64Bytes(change.content);
-        // oxlint-disable-next-line no-await-in-loop -- R2 書き込み（順次適用の意図）のため
-        await writeCachedRaw(
-          bucket,
-          owner,
-          repoName,
-          change.path,
-          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-          inferContentType(change.path),
-        );
-        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
-        await markVaultDirty(bucket, owner, repoName, change.path);
-      }
-      treeChanges.push({ op: 'add', path: change.path });
-    } else if (change.op === 'delete') {
-      // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
-      await deleteCachedNote(bucket, owner, repoName, change.path);
-      // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
-      await deleteCachedRaw(bucket, owner, repoName, change.path);
-      // ローカル削除の tombstone を記録する（同期のプルで復活させず、
-      // push で GitHub へ削除を反映する。r2-vault.ts の vaultDeletedKey 参照）
-      // oxlint-disable-next-line no-await-in-loop -- tombstone 記録（順次適用の意図）のため
-      await markVaultDeleted(bucket, owner, repoName, change.path);
-      treeChanges.push({ op: 'remove', path: change.path });
-    } else if (change.op === 'move' || change.op === 'copy') {
-      if (change.to === null) {
-        // parseCommitBody で保証されるため到達しない（型の防御線）
-        return { ok: false, response: Response.json({ error: 'invalid_body' }, { status: 400 }) };
-      }
-      const source = change.path;
-      const destination = change.to;
-      // oxlint-disable-next-line no-await-in-loop -- 元パスの存在確認（順次適用の意図）のため
-      const note = await readCachedNote(bucket, owner, repoName, source);
-      if (note !== null) {
-        // oxlint-disable-next-line no-await-in-loop -- R2 書き込み（順次適用の意図）のため
-        await writeCachedNote(bucket, owner, repoName, destination, note);
-        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
-        await markVaultDirty(bucket, owner, repoName, destination);
-        if (change.op === 'move') {
-          // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
-          await deleteCachedNote(bucket, owner, repoName, source);
-          // 移動元はローカル削除として tombstone を記録する（delete と同じ扱い）
-          // oxlint-disable-next-line no-await-in-loop -- tombstone 記録（順次適用の意図）のため
-          await markVaultDeleted(bucket, owner, repoName, source);
-        }
-      } else {
-        // oxlint-disable-next-line no-await-in-loop -- 元パスの存在確認（順次適用の意図）のため
-        const raw = await readCachedRaw(bucket, owner, repoName, source);
-        if (raw === null) {
-          return {
-            ok: false,
-            response: Response.json(
-              {
-                error: 'invalid_change',
-                message:
-                  change.op === 'move'
-                    ? `移動元「${source}」が見つかりません。`
-                    : `複製元「${source}」が見つかりません。`,
-              },
-              { status: 400 },
-            ),
-          };
-        }
-        // oxlint-disable-next-line no-await-in-loop -- R2 書き込み（順次適用の意図）のため
-        await writeCachedRaw(bucket, owner, repoName, destination, raw.body, raw.contentType);
-        // oxlint-disable-next-line no-await-in-loop -- dirty 記録（順次適用の意図）のため
-        await markVaultDirty(bucket, owner, repoName, destination);
-        if (change.op === 'move') {
-          // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
-          await deleteCachedRaw(bucket, owner, repoName, source);
-          // 移動元はローカル削除として tombstone を記録する（delete と同じ扱い）
-          // oxlint-disable-next-line no-await-in-loop -- tombstone 記録（順次適用の意図）のため
-          await markVaultDeleted(bucket, owner, repoName, source);
-        }
-      }
-      treeChanges.push({ op: 'add', path: destination });
-      if (change.op === 'move') {
-        treeChanges.push({ op: 'remove', path: source });
-      }
-    }
-  }
-  await applyVaultTreeChanges(bucket, owner, repoName, treeChanges);
-  return { ok: true };
-}
-
 export async function handleCommitPost(context: RouteContext): Promise<Response> {
   const { env, request, params } = context;
   const owner = paramToString(params.owner);
@@ -318,7 +159,7 @@ export async function handleCommitPost(context: RouteContext): Promise<Response>
   try {
     config = resolveProxyConfig(env);
   } catch (error) {
-    if (error instanceof ProxyConfigError) {
+    if (isProxyConfigError(error)) {
       return Response.json(
         { error: 'auth_not_configured', message: error.message },
         { status: 503 },
@@ -377,5 +218,5 @@ export async function handleCommitPost(context: RouteContext): Promise<Response>
 }
 
 export const POST = createRoute((c) =>
-  handleCommitPost({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleCommitPost(toRouteContext(c.env, c.req.raw, c.req.param())),
 );

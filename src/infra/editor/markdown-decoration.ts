@@ -10,21 +10,28 @@
  * 差し替えるが、ソーステキスト自体は変わらない。
  *
  * 装飾クラスは tk- プレフィックスを使い、アプリの CSS 変数（--color-*）に
- * 追従させる（ダークモードでも整合する）。
+ * 追従させる（ダークモードでも整合する）。スタイルは markdown-decoration-theme、
+ * フロントマテリア領域は frontmatter-decoration が担う。
  */
 
-import { RangeSetBuilder, StateField } from '@codemirror/state';
-import type { Text } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
-import type { DecorationSet } from '@codemirror/view';
+import { RangeSetBuilder, StateField, type Text } from '@codemirror/state';
+import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 
 import {
   parseMarkdownDecorations,
   type MarkdownDecoration,
   type MarkdownDecorationType,
 } from '@/domain/markdown/parse';
+import {
+  frontmatterFieldMarks,
+  frontmatterRanges,
+  FrontmatterPropertyWidget,
+} from '@/infra/editor/frontmatter-decoration';
+
+export { FrontmatterPropertyWidget };
 
 /** タスクリストのチェックボックス表示（ソースの `[ ]` を視覚的に置き換える） */
+// eslint-disable-next-line no-restricted-syntax -- CodeMirror WidgetType は抽象クラス継承が必須のフレームワーク API（class 禁止ルールの対象外）
 export class TaskCheckboxWidget extends WidgetType {
   constructor(readonly checked: boolean) {
     super();
@@ -46,6 +53,7 @@ export class TaskCheckboxWidget extends WidgetType {
   }
 }
 
+// eslint-disable-next-line no-restricted-syntax -- CodeMirror WidgetType は抽象クラス継承が必須のフレームワーク API（class 禁止ルールの対象外）
 export class HtmlBreakWidget extends WidgetType {
   override toDOM(): HTMLElement {
     return document.createElement('br');
@@ -56,56 +64,48 @@ export class HtmlBreakWidget extends WidgetType {
   }
 }
 
-export class FrontmatterPropertyWidget extends WidgetType {
-  override toDOM(): HTMLElement {
-    const icon = document.createElement('span');
-    icon.className = 'tk-frontmatter-property-icon';
-    icon.textContent = '☷';
-    icon.setAttribute('aria-hidden', 'true');
-    return icon;
-  }
+/** 行全体に適用する装飾種別（Decoration.line を使うもの） */
+const LINE_TYPES: ReadonlySet<MarkdownDecorationType> = new Set([
+  'code-fence',
+  'code-block',
+  'quote',
+]);
 
-  override ignoreEvent(): boolean {
-    return true;
+/** 行全体に適用する装飾種別（Decoration.line を使うもの） */
+
+/** スパン装飾のクラス名（テーブル駆動。heading / task-checkbox / 行装飾は個別処理） */
+const DECORATION_CLASSES: Readonly<Partial<Record<MarkdownDecorationType, string>>> = {
+  'heading-marker': 'tk-heading-marker',
+  bold: 'tk-bold',
+  italic: 'tk-italic',
+  'bold-italic': 'tk-bold-italic',
+  'inline-code': 'tk-inline-code',
+  'list-marker': 'tk-list-marker',
+  'task-marker': 'tk-task-marker',
+  'quote-marker': 'tk-quote-marker',
+  'link-text': 'tk-link',
+  'link-url': 'tk-link-url',
+  hr: 'tk-hr',
+};
+
+function toDecoration(d: MarkdownDecoration): Decoration {
+  if (d.type === 'heading') {
+    return Decoration.mark({ class: `tk-heading tk-heading-${d.level ?? 1}` });
   }
+  if (d.type === 'task-checkbox') {
+    return Decoration.replace({ widget: new TaskCheckboxWidget(d.checked ?? false) });
+  }
+  if (LINE_TYPES.has(d.type)) {
+    const lineClass =
+      d.type === 'quote' ? 'tk-quote' : d.type === 'code-block' ? 'tk-code-block' : 'tk-code-fence';
+    return Decoration.line({ class: lineClass });
+  }
+  return Decoration.mark({ class: DECORATION_CLASSES[d.type] ?? '' });
 }
 
-/** 解析結果 1 件を対応する Decoration に変換する */
-function toDecoration(d: MarkdownDecoration): Decoration {
-  switch (d.type) {
-    case 'heading-marker':
-      return Decoration.mark({ class: 'tk-heading-marker' });
-    case 'heading':
-      return Decoration.mark({ class: `tk-heading tk-heading-${d.level ?? 1}` });
-    case 'bold':
-      return Decoration.mark({ class: 'tk-bold' });
-    case 'italic':
-      return Decoration.mark({ class: 'tk-italic' });
-    case 'bold-italic':
-      return Decoration.mark({ class: 'tk-bold-italic' });
-    case 'inline-code':
-      return Decoration.mark({ class: 'tk-inline-code' });
-    case 'code-fence':
-      return Decoration.line({ class: 'tk-code-fence' });
-    case 'code-block':
-      return Decoration.line({ class: 'tk-code-block' });
-    case 'list-marker':
-      return Decoration.mark({ class: 'tk-list-marker' });
-    case 'task-marker':
-      return Decoration.mark({ class: 'tk-task-marker' });
-    case 'task-checkbox':
-      return Decoration.replace({ widget: new TaskCheckboxWidget(d.checked ?? false) });
-    case 'quote':
-      return Decoration.line({ class: 'tk-quote' });
-    case 'quote-marker':
-      return Decoration.mark({ class: 'tk-quote-marker' });
-    case 'link-text':
-      return Decoration.mark({ class: 'tk-link' });
-    case 'link-url':
-      return Decoration.mark({ class: 'tk-link-url' });
-    case 'hr':
-      return Decoration.mark({ class: 'tk-hr' });
-  }
+/** RangeSetBuilder の startSide 順序: line decoration 相当（quote 等）を先に置く */
+function startSide(d: MarkdownDecoration): number {
+  return LINE_TYPES.has(d.type) ? -1 : 1;
 }
 
 /**
@@ -123,7 +123,7 @@ export function computeDecorationSet(doc: Text): DecorationSet {
     ...decorations.map((decoration) => ({
       from: decoration.from,
       to: decoration.to,
-      line: isLineType(decoration.type),
+      line: LINE_TYPES.has(decoration.type),
       value: toDecoration(decoration),
     })),
     ...htmlCommentRanges(text),
@@ -133,23 +133,25 @@ export function computeDecorationSet(doc: Text): DecorationSet {
     ...htmlBreakRanges(text),
   ].toSorted((a, b) => a.from - b.from || Number(a.line) * -1 - Number(b.line) * -1);
   for (const range of ranges) {
-    // LineDecoration はゼロ長で追加する（CM6 の制約: 行全体への適用は from の行で決まる）
     if (range.line) {
+      // LineDecoration はゼロ長で追加する（CM6 の制約: 行全体への適用は from の行で決まる）
       builder.add(range.from, range.from, range.value);
-    } else {
-      builder.add(range.from, range.to, range.value);
+      continue;
     }
+    builder.add(range.from, range.to, range.value);
   }
   return builder.finish();
 }
 
-function htmlBreakRanges(text: string): Array<{
+type ZeroWidthRange = {
   from: number;
   to: number;
   line: false;
   value: Decoration;
-}> {
-  const ranges: Array<{ from: number; to: number; line: false; value: Decoration }> = [];
+};
+
+function htmlBreakRanges(text: string): ZeroWidthRange[] {
+  const ranges: ZeroWidthRange[] = [];
   for (const match of text.matchAll(/<br\s*\/?>/gi)) {
     const from = match.index;
     if (from === undefined) {
@@ -161,63 +163,6 @@ function htmlBreakRanges(text: string): Array<{
       line: false,
       value: Decoration.replace({ widget: new HtmlBreakWidget() }),
     });
-  }
-  return ranges;
-}
-
-function frontmatterFieldMarks(text: string): Array<{
-  from: number;
-  to: number;
-  line: false;
-  value: Decoration;
-}> {
-  const lines = text.split('\n');
-  if ((lines[0] ?? '').trim() !== '---') {
-    return [];
-  }
-  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
-  if (end < 0) {
-    return [];
-  }
-  const ranges: Array<{ from: number; to: number; line: false; value: Decoration }> = [];
-  let offset = 0;
-  for (let index = 0; index <= end; index += 1) {
-    const line = lines[index] ?? '';
-    if (index > 0 && index < end) {
-      const separator = line.indexOf(':');
-      if (separator > 0) {
-        ranges.push({
-          from: offset,
-          to: offset,
-          line: false,
-          value: Decoration.widget({ widget: new FrontmatterPropertyWidget() }),
-        });
-        ranges.push({
-          from: offset,
-          to: offset + separator,
-          line: false,
-          value: Decoration.mark({ class: 'tk-frontmatter-field-key' }),
-        });
-        ranges.push({
-          from: offset + separator,
-          to: offset + separator + 1,
-          line: false,
-          value: Decoration.mark({ class: 'tk-frontmatter-field-separator' }),
-        });
-        const valueStart = offset + separator + 1;
-        const value = line.slice(separator + 1).match(/^\s*(.*)$/)?.[1] ?? '';
-        if (value.length > 0) {
-          const valueFrom = valueStart + line.slice(separator + 1).indexOf(value);
-          ranges.push({
-            from: valueFrom,
-            to: valueFrom + value.length,
-            line: false,
-            value: Decoration.mark({ class: 'tk-frontmatter-field-value' }),
-          });
-        }
-      }
-    }
-    offset += line.length + 1;
   }
   return ranges;
 }
@@ -248,44 +193,8 @@ function cardHeadingRanges(text: string): Array<{
   return ranges;
 }
 
-function frontmatterRanges(text: string): Array<{
-  from: number;
-  to: number;
-  line: true;
-  value: Decoration;
-}> {
-  const lines = text.split('\n');
-  if ((lines[0] ?? '').trim() !== '---') {
-    return [];
-  }
-  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
-  if (end < 0) {
-    return [];
-  }
-  const ranges = [];
-  let offset = 0;
-  for (let index = 0; index <= end; index += 1) {
-    const delimiter = index === 0 || index === end;
-    ranges.push({
-      from: offset,
-      to: offset,
-      line: true as const,
-      value: Decoration.line({
-        class: delimiter ? 'tk-frontmatter-delimiter' : 'tk-frontmatter-field',
-      }),
-    });
-    offset += (lines[index] ?? '').length + 1;
-  }
-  return ranges;
-}
-
-function htmlCommentRanges(text: string): Array<{
-  from: number;
-  to: number;
-  line: false;
-  value: Decoration;
-}> {
-  const ranges: Array<{ from: number; to: number; line: false; value: Decoration }> = [];
+function htmlCommentRanges(text: string): ZeroWidthRange[] {
+  const ranges: ZeroWidthRange[] = [];
   const comments = /<!--[\s\S]*?-->/g;
   for (const match of text.matchAll(comments)) {
     const from = match.index;
@@ -300,23 +209,6 @@ function htmlCommentRanges(text: string): Array<{
     });
   }
   return ranges;
-}
-
-/** 行全体に適用する装飾種別（Decoration.line を使う） */
-function isLineType(type: MarkdownDecorationType): boolean {
-  switch (type) {
-    case 'code-fence':
-    case 'code-block':
-    case 'quote':
-      return true;
-    default:
-      return false;
-  }
-}
-
-/** RangeSetBuilder の startSide 順序: line decoration 相当（quote 等）を先に置く */
-function startSide(d: MarkdownDecoration): number {
-  return isLineType(d.type) ? -1 : 1;
 }
 
 /**
@@ -335,72 +227,4 @@ export const markdownDecoration = StateField.define<DecorationSet>({
     return computeDecorationSet(tr.state.doc);
   },
   provide: (field) => EditorView.decorations.from(field),
-});
-
-/** 装飾クラスのスタイル。アプリの CSS 変数に追従しダークモードでも整合する */
-export const markdownDecorationTheme = EditorView.baseTheme({
-  '.tk-html-comment': { color: '#6272a4' },
-  '.tk-heading-marker': { color: 'var(--color-fg-muted)' },
-  '.tk-heading': { fontWeight: '700', color: 'var(--color-fg)' },
-  '.tk-heading-1': { fontSize: '1.6em', lineHeight: 1.25 },
-  '.tk-heading-2': { fontSize: '1.4em', lineHeight: 1.3 },
-  '.tk-heading-3': { fontSize: '1.2em', lineHeight: 1.35 },
-  '.tk-heading-4': { fontSize: '1.05em' },
-  '.tk-heading-5': { fontSize: '1em' },
-  '.tk-heading-6': { fontSize: '0.95em', color: 'var(--color-fg-muted)' },
-  '.tk-bold': { fontWeight: '800' },
-  '.tk-italic': { fontStyle: 'italic' },
-  '.tk-bold-italic': { fontWeight: '800', fontStyle: 'italic' },
-  '.tk-inline-code': {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.875em',
-    backgroundColor: 'var(--color-bg-subtle)',
-    borderRadius: '4px',
-    padding: '0.1em 0.35em',
-  },
-  '.tk-code-block': {
-    display: 'block',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.875em',
-    backgroundColor: 'var(--color-bg-subtle)',
-    padding: '0 0.75em',
-  },
-  '.tk-code-fence': {
-    display: 'block',
-    fontFamily: 'var(--font-mono)',
-    fontSize: '0.875em',
-    backgroundColor: 'var(--color-bg-subtle)',
-    color: 'var(--color-fg-muted)',
-    padding: '0 0.75em',
-  },
-  '.tk-list-marker': { color: 'var(--color-fg-muted)' },
-  '.tk-task-marker': { color: 'var(--color-fg-muted)' },
-  '.tk-task-checkbox': {
-    display: 'inline-block',
-    width: '0.95em',
-    height: '0.95em',
-    border: '1px solid var(--color-border)',
-    borderRadius: '4px',
-    backgroundColor: 'var(--color-bg)',
-    marginRight: '0.35em',
-    verticalAlign: '-0.1em',
-  },
-  '.tk-task-checkbox.checked': {
-    backgroundColor: 'var(--color-accent)',
-    borderColor: 'var(--color-accent)',
-  },
-  '.tk-quote': {
-    borderLeft: '3px solid var(--color-border)',
-    paddingLeft: 'var(--space-md)',
-    color: 'var(--color-fg-muted)',
-  },
-  '.tk-quote-marker': { color: 'var(--color-fg-muted)' },
-  '.tk-link': { color: 'var(--color-accent)', textDecoration: 'underline' },
-  '.tk-link-url': { color: 'var(--color-fg-muted)' },
-  '.tk-hr': {
-    display: 'block',
-    height: '1px',
-    backgroundColor: 'var(--color-border)',
-    color: 'transparent',
-  },
 });

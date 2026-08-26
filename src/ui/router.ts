@@ -17,10 +17,8 @@
 
 import { useEffect, useState } from 'react';
 
-import { err, ok } from '@/domain/result';
-import type { Result } from '@/domain/result';
-import { isValidGitHubName } from '@/domain/vault';
-import type { VaultRef } from '@/domain/vault';
+import { err, ok, type Result } from '@/domain/result';
+import { isValidGitHubName, type VaultRef } from '@/domain/vault';
 
 export type Route =
   | { kind: 'vaults' }
@@ -107,10 +105,10 @@ export function navigate(to: string): void {
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
   useEffect(() => {
-    const sync = () => setRoute(parseRoute(window.location.pathname));
+    const sync = (): void => setRoute(parseRoute(window.location.pathname));
     window.addEventListener('popstate', sync);
     window.addEventListener(NAVIGATE_EVENT_NAME, sync);
-    return () => {
+    return (): void => {
       window.removeEventListener('popstate', sync);
       window.removeEventListener(NAVIGATE_EVENT_NAME, sync);
     };

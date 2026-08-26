@@ -10,13 +10,13 @@
  */
 
 /** Vault の識別子（GitHub の owner / repository 名の組） */
-export interface VaultRef {
+export type VaultRef = {
   readonly owner: string;
   readonly name: string;
-}
+};
 
 /** ユーザーが選択可能な Vault */
-export interface Vault extends VaultRef {
+export type Vault = {
   /** "owner/name" 形式の表示名 */
   readonly fullName: string;
   readonly description: string | null;
@@ -25,7 +25,7 @@ export interface Vault extends VaultRef {
   readonly defaultBranch: string;
   /** 最終更新日時（ISO 8601 文字列。不明な場合は空文字） */
   readonly updatedAt: string;
-}
+} & VaultRef;
 
 export function vaultRefFullName(ref: VaultRef): string {
   return `${ref.owner}/${ref.name}`;
@@ -40,11 +40,11 @@ export function isValidGitHubName(name: string): boolean {
 }
 
 /** Vault 候補の適格判定に必要な属性 */
-export interface VaultCandidateEligibility {
+export type VaultCandidateEligibility = {
   /** write（push）以上の権限があるか */
   readonly hasWritePermission: boolean;
   readonly isArchived: boolean;
-}
+};
 
 /**
  * リポジトリが Vault 候補かどうかを判定する。

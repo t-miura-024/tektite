@@ -12,15 +12,15 @@
 
 import { Effect, Layer } from 'effect';
 
-import { DraftStore, DraftStoreError } from '@/application/draft';
+import { draftStoreError, DraftStore } from '@/application/draft';
 import type { VaultRef } from '@/domain/vault';
 
 /** localStorage 互換の最小インターフェース（テストで差し替え可能にする） */
-export interface KeyValueStorage {
+export type KeyValueStorage = {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
-}
+};
 
 const KEY_PREFIX = 'draft:';
 
@@ -32,18 +32,19 @@ function draftKey(ref: VaultRef, notePath: string): string {
 /** localStorage が利用できない環境用のスタブ（全操作が unavailable で失敗する） */
 const unavailableStorage: KeyValueStorage = {
   getItem(): never {
-    throw new DraftStoreError('unavailable', 'この環境ではローカルストレージを利用できません。');
+    throw draftStoreError('unavailable', 'この環境ではローカルストレージを利用できません。');
   },
   setItem(): never {
-    throw new DraftStoreError('unavailable', 'この環境ではローカルストレージを利用できません。');
+    throw draftStoreError('unavailable', 'この環境ではローカルストレージを利用できません。');
   },
   removeItem(): never {
-    throw new DraftStoreError('unavailable', 'この環境ではローカルストレージを利用できません。');
+    throw draftStoreError('unavailable', 'この環境ではローカルストレージを利用できません。');
   },
 };
 
 /** ブラウザの localStorage を解決する（なければ unavailable スタブを返す） */
 function resolveBrowserStorage(): KeyValueStorage {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- globalThis の localStorage は実行環境依存のため境界で型を確定する
   const storage = (globalThis as { localStorage?: KeyValueStorage }).localStorage;
   return typeof storage === 'undefined' || storage === null ? unavailableStorage : storage;
 }
@@ -56,7 +57,7 @@ export function createDraftStoreLive(storage: KeyValueStorage): Layer.Layer<Draf
         const raw = yield* Effect.try({
           try: () => storage.getItem(draftKey(ref, notePath)),
           catch: (error) =>
-            new DraftStoreError('unavailable', 'Draft の読み出しに失敗しました。', {
+            draftStoreError('unavailable', 'Draft の読み出しに失敗しました。', {
               cause: error,
             }),
         });
@@ -67,7 +68,7 @@ export function createDraftStoreLive(storage: KeyValueStorage): Layer.Layer<Draf
       Effect.try({
         try: () => storage.setItem(draftKey(ref, notePath), content),
         catch: (error) =>
-          new DraftStoreError('quota', 'Draft を保存できませんでした（容量不足）。', {
+          draftStoreError('quota', 'Draft を保存できませんでした（容量不足）。', {
             cause: error,
           }),
       }),
@@ -76,7 +77,7 @@ export function createDraftStoreLive(storage: KeyValueStorage): Layer.Layer<Draf
       Effect.try({
         try: () => storage.removeItem(draftKey(ref, notePath)),
         catch: (error) =>
-          new DraftStoreError('unavailable', 'Draft の破棄に失敗しました。', {
+          draftStoreError('unavailable', 'Draft の破棄に失敗しました。', {
             cause: error,
           }),
       }),

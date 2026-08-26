@@ -20,18 +20,17 @@
  * - 張り替え対象外（移動と無関係なリンク・壊れリンク）は本文を変更しない
  */
 
-import { parseNotation } from '@/domain/notation/parse';
-import type { NotationSpan } from '@/domain/notation/parse';
+import { parseNotation, type NotationSpan } from '@/domain/notation/parse';
 import { resolveNotePath } from '@/domain/notation/resolve';
 
 /** 移動 1 件（from: 旧パス → to: 新パス。ファイル・ディレクトリ内ファイル単位） */
-export interface MovePair {
+export type MovePair = {
   readonly from: string;
   readonly to: string;
-}
+};
 
 /** 張り替えられなかった参照（警告として UI へ通知する） */
-export interface RewriteIssue {
+export type RewriteIssue = {
   readonly kind: 'ambiguous';
   /** 参照元ノートのパス */
   readonly path: string;
@@ -39,9 +38,9 @@ export interface RewriteIssue {
   readonly target: string;
   /** 候補に入っていた移動元パス（解決規則の勝者ではなかったもの） */
   readonly movedCandidates: readonly string[];
-}
+};
 
-export interface RewritePlan {
+export type RewritePlan = {
   /**
    * 旧パス → 張り替え後の本文。本文が実際に変化したノートだけを含む
    * （移動元ノート自身が自分のリンクを張り替える場合もここに入る）
@@ -49,23 +48,23 @@ export interface RewritePlan {
   readonly rewritten: ReadonlyMap<string, string>;
   /** 張り替えられなかった曖昧参照（規則で確定できないもの） */
   readonly issues: readonly RewriteIssue[];
-}
+};
 
-export interface RewriteInput {
+export type RewriteInput = {
   /** 移動の対応（from → to）。from と to はファイルパス単位 */
   readonly moves: readonly MovePair[];
   /** Vault 内の全ノート本文（旧パス基準） */
   readonly contents: ReadonlyMap<string, string>;
   /** Vault 内の全ファイルパス（旧パス基準。画像等の非 Markdown も含む） */
   readonly filePaths: readonly string[];
-}
+};
 
 /** 参照スパン 1 件の張り替え結果 */
-interface Edit {
+type Edit = {
   readonly from: number;
   readonly to: number;
   readonly text: string;
-}
+};
 
 /** 移動 1 件の張り替え対象パス（`[[a]]` が `dir/a.md` に解決するかの判定） */
 function isMovedCandidate(target: string, from: string): boolean {

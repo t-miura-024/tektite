@@ -15,14 +15,21 @@
  */
 
 import { clearSessionCookie, readAccessToken } from '@/api/_lib/session';
+import { isErrorNamed, makeNamedError } from '@/api/_lib/error-object';
 
 const DEFAULT_GITHUB_API_BASE_URL = 'https://api.github.com';
 
-export class ProxyConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ProxyConfigError';
-  }
+/** プロキシ系エンドポイントの設定不備（SESSION_SECRET 未設定など）のエラー */
+export type ProxyConfigError = Error;
+
+/** ProxyConfigError を生成するファクトリ */
+export function proxyConfigError(message: string): ProxyConfigError {
+  return makeNamedError('ProxyConfigError', message);
+}
+
+/** error が ProxyConfigError かどうか */
+export function isProxyConfigError(error: unknown): error is ProxyConfigError {
+  return isErrorNamed(error, 'ProxyConfigError');
 }
 
 /**
@@ -34,14 +41,14 @@ export function isPatModeEnabled(env: Env): boolean {
   return env.TEKTITE_PAT_AUTH === 'true' && !!env.GITHUB_PERSONAL_TOKEN;
 }
 
-export interface ProxyConfig {
+export type ProxyConfig = {
   /** セッション Cookie 復号用の鍵。PAT モードでは null（不要） */
   sessionSecret: string | null;
   /** PAT モード時のトークン。OAuth モードでは null */
   patToken: string | null;
   /** サーバー側 GitHub API ベース URL（E2E でモック差し替え可能） */
   apiBaseUrl: string;
-}
+};
 
 /** プロキシ系エンドポイントに必要な設定だけを検証する（OAuth 資格情報は不要） */
 export function resolveProxyConfig(env: Env): ProxyConfig {
@@ -54,7 +61,7 @@ export function resolveProxyConfig(env: Env): ProxyConfig {
     };
   }
   if (!env.SESSION_SECRET) {
-    throw new ProxyConfigError('環境変数 SESSION_SECRET が設定されていません');
+    throw proxyConfigError('環境変数 SESSION_SECRET が設定されていません');
   }
   return {
     sessionSecret: env.SESSION_SECRET,

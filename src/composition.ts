@@ -12,25 +12,28 @@
 import { Cause, Effect, Exit, Layer, Option } from 'effect';
 
 import { DraftStore } from '@/application/draft';
-import { NoteIndexRegistry } from '@/application/note-index';
+import { NoteIndexRegistry, NoteIndexRegistryLive } from '@/application/note-index';
 import { NoteGateway } from '@/application/note';
 import type { SessionGateway } from '@/application/session';
 import type { VaultGateway } from '@/application/vault';
-import { createEditorView as createEditorViewImpl } from '@/infra/editor/editor';
-import type { EditorHandle, EditorOptions } from '@/infra/editor/editor';
-import { collectEmbedContents } from '@/infra/render/embed-contents';
-import type { EmbedContentFetcher } from '@/infra/render/embed-contents';
-import { renderNoteMarkdown } from '@/infra/render/render';
-import type { RenderNotationOptions, RenderNotationResult } from '@/infra/render/render';
+import {
+  createEditorView as createEditorViewImpl,
+  type EditorHandle,
+  type EditorOptions,
+} from '@/infra/editor/editor';
+import { collectEmbedContents, type EmbedContentFetcher } from '@/infra/render/embed-contents';
+import {
+  renderNoteMarkdown,
+  type RenderNotationOptions,
+  type RenderNotationResult,
+} from '@/infra/render/render';
 import { sanitizeHtml } from '@/infra/render/sanitize';
 import { slugify } from '@/infra/render/slug';
-
-/** CM6 エディタの opaque ハンドル型（UI 層は infra を import できないためここで公開） */
-export type { EditorHandle, EditorOptions } from '@/infra/editor/editor';
 import { SessionGatewayLive } from '@/infra/auth/session-gateway';
 import { NoteGatewayLive, VaultGatewayLive } from '@/infra/github/http-gateway';
-import { NoteIndexRegistryLive } from '@/application/note-index';
 import { DraftStoreLive } from '@/infra/storage/draft-store';
+
+export type { EditorHandle, EditorOptions };
 
 /** 本アプリが組み立てる全ポートの実装 */
 export const MainLive = Layer.merge(
