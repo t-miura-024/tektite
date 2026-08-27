@@ -7,9 +7,7 @@
  * Tab のみを処理する。aria-modal="true" は各パネルが指定する。
  */
 
-import { useEffect } from 'react';
-import type { RefObject } from 'react';
-
+import { useEffect, type RefObject } from 'react';
 /** フォーカス可能な要素のセレクタ（disabled / aria-hidden は除外する） */
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -53,12 +51,12 @@ export function useFocusTrap(containerRef: RefObject<HTMLElement | null>, active
       if (event.shiftKey) {
         const previous = index <= 0 ? last : focusable[index - 1];
         previous?.focus();
-      } else {
-        const next = index === -1 || index === focusable.length - 1 ? first : focusable[index + 1];
-        next?.focus();
+        return;
       }
+      const next = index === -1 || index === focusable.length - 1 ? first : focusable[index + 1];
+      next?.focus();
     };
     container.addEventListener('keydown', onKeyDown);
-    return () => container.removeEventListener('keydown', onKeyDown);
+    return (): void => container.removeEventListener('keydown', onKeyDown);
   }, [containerRef, active]);
 }

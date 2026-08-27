@@ -19,9 +19,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/_lib/github-proxy', () => ({
-  ProxyConfigError: class ProxyConfigError extends Error {
-    name = 'ProxyConfigError';
-  },
+  isProxyConfigError: (error: unknown): boolean =>
+    error instanceof Error && error.name === 'ProxyConfigError',
   resolveProxyConfig: mocks.resolveProxyConfig,
   authenticateRequest: mocks.authenticateRequest,
   githubApiFetch: mocks.githubApiFetch,
@@ -70,18 +69,18 @@ class FakeR2Bucket {
 }
 
 class FakeR2ObjectBody {
-  constructor(private readonly data: { body: ArrayBuffer; metadata?: Record<string, string> }) {}
+  constructor(private readonly entry: { body: ArrayBuffer; metadata?: Record<string, string> }) {}
 
   get customMetadata(): Record<string, string> {
-    return this.data.metadata ?? {};
+    return this.entry.metadata ?? {};
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {
-    return this.data.body;
+    return this.entry.body;
   }
 
   async json(): Promise<unknown> {
-    return JSON.parse(new TextDecoder().decode(this.data.body));
+    return JSON.parse(new TextDecoder().decode(this.entry.body));
   }
 }
 

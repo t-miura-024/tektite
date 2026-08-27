@@ -4,12 +4,12 @@
  * 各画面（エラー UX 基本方針: トースト表示 + リトライ導線）で使う。
  */
 
-export interface ToastAction {
+export type ToastAction = {
   readonly label: string;
   readonly onClick: () => void;
-}
+};
 
-export interface ToastState {
+export type ToastState = {
   readonly message: string;
   readonly action?: ToastAction;
-}
+};

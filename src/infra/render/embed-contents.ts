@@ -35,10 +35,9 @@ export async function collectEmbedContents(
   const queued = new Set<string>([rootPath]);
   let frontier: ReadonlyArray<{ path: string; depth: number }> = [{ path: rootPath, depth: 0 }];
 
-  while (frontier.length > 0) {
+  for (; frontier.length > 0;) {
     // 波単位の並列取得（BFS の深さごとに Promise.all する。直列だと埋め込みが
     // 深いノートで逐次 fetch になるため）
-    // eslint-disable-next-line no-await-in-loop -- BFS の波を待ってから次の波を処理する
     const results = await Promise.all(
       frontier.map(async (item) => ({ item, note: await fetch(item.path) })),
     );

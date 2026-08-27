@@ -9,11 +9,11 @@ import {
 /** Vault 内のファイルパス（テスト用の固定データ） */
 const FILE_PATHS = ['a.md', 'daily/b.md', 'attachments/logo.png', 'wiki.md'];
 
-interface Found {
+type Found = {
   readonly from: number;
   readonly to: number;
   readonly className?: string;
-}
+};
 
 /** ドキュメントの記法装飾セットをクラス名と位置のリストに変換する */
 function collect(docText: string): Found[] {

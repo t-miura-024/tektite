@@ -12,11 +12,12 @@
  */
 
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { Compartment, EditorState } from '@codemirror/state';
-import type { Extension } from '@codemirror/state';
+import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 
-import { markdownDecoration, markdownDecorationTheme } from '@/infra/editor/markdown-decoration';
+import { markdownDecoration } from '@/infra/editor/markdown-decoration';
+import { markdownDecorationTheme } from '@/infra/editor/markdown-decoration-theme';
+import { uploadExtension } from '@/infra/editor/upload';
 import {
   notationDecoration,
   notationDecorationTheme,
@@ -29,7 +30,7 @@ import {
  * onWikilinkClick は解決済みのリンク先（パス + 見出し）を通知するコールバック。
  * onUploadImage は画像のペースト/ドロップ時に呼ばれる（M2）。
  */
-export interface EditorOptions {
+export type EditorOptions = {
   /** Vault 内の全ファイルパス（未指定なら記法装飾を組み込まない） */
   readonly filePaths?: readonly string[];
   /** WikiLink クリック時の遷移コールバック（ターゲットが解決できた場合のみ） */
@@ -40,13 +41,13 @@ export interface EditorOptions {
    * `![[パス]]` を挿入する。失敗（アップロード側で通知済み）は null を返す。
    */
   readonly onUploadImage?: (file: File) => Promise<string | null>;
-}
+};
 
 /**
  * 生成したエディタの不透明なハンドル（UI 層は CM6 の型を知らない）。
  * 本文の読み書きとイベント購読（自動保存・未保存判定用）を提供する。
  */
-export interface EditorHandle {
+export type EditorHandle = {
   readonly destroy: () => void;
   /** 現在の本文を取得する */
   readonly getContent: () => string;
@@ -71,7 +72,7 @@ export interface EditorHandle {
   readonly onBlur: (callback: () => void) => void;
   /** 本文変更の通知を購読する（未保存判定と Draft 退避のトリガー） */
   readonly onChange: (callback: (content: string) => void) => void;
-}
+};
 
 /** システム / アプリ設定のダークモード判定（CM6 のテーマ配色選択用） */
 function isDarkMode(): boolean {
@@ -89,7 +90,7 @@ function isDarkMode(): boolean {
 }
 
 /** アプリの CSS 変数に追従するエディタテーマ */
-const editorTheme = (dark: boolean) =>
+const editorTheme = (dark: boolean): Extension =>
   EditorView.theme(
     {
       '&': {
@@ -242,16 +243,16 @@ export function createEditorView(
   });
 
   return {
-    destroy: () => view.destroy(),
-    getContent: () => view.state.doc.toString(),
-    setContent: (content: string) => {
+    destroy: (): void => view.destroy(),
+    getContent: (): string => view.state.doc.toString(),
+    setContent: (content: string): void => {
       const current = view.state.doc.toString();
       if (current === content) {
         return;
       }
       view.dispatch({ changes: { from: 0, to: current.length, insert: content } });
     },
-    scrollToLine: (line: number) => {
+    scrollToLine: (line: number): void => {
       const document = view.state.doc;
       const clamped = Math.min(Math.max(1, line), document.lines);
       const pos = document.line(clamped).from;
@@ -260,17 +261,17 @@ export function createEditorView(
         effects: EditorView.scrollIntoView(pos, { y: 'start' }),
       });
     },
-    updateFilePaths: (filePaths) => {
+    updateFilePaths: (filePaths: readonly string[]): void => {
       view.dispatch({
         effects: filePathsCompartment.reconfigure(
           buildNotationExtensions({ ...options, filePaths }),
         ),
       });
     },
-    onBlur: (callback) => {
+    onBlur: (callback: () => void): void => {
       blurCallbacks.add(callback);
     },
-    onChange: (callback) => {
+    onChange: (callback: (content: string) => void): void => {
       changeCallbacks.add(callback);
     },
   };
@@ -286,79 +287,4 @@ function buildNotationExtensions(options: EditorOptions): Extension[] {
     extensions.push(wikilinkClickExtension(options));
   }
   return extensions;
-}
-
-/** dataTransfer / clipboardData に含まれる画像ファイルを抽出する（純関数。テスト用） */
-export function imageFilesFrom(data: DataTransfer | null): File[] {
-  if (data === null) {
-    return [];
-  }
-  return Array.from(data.files).filter((file) => file.type.startsWith('image/'));
-}
-
-/** 複数画像の Embed 挿入スニペット（`![[パス]]` を改行区切りで連結する） */
-export function imageEmbedSnippet(paths: readonly string[]): string {
-  return paths.map((path) => `![[${path}]]`).join('\n');
-}
-
-/**
- * 画像をアップロードし、成功分の `![[パス]]` を position へ挿入する。
- * 失敗分は挿入しない（失敗通知はアップロード側が行う）。全滅時は本文を変えない。
- */
-async function insertUploadedImages(
-  view: EditorView,
-  files: readonly File[],
-  upload: (file: File) => Promise<string | null>,
-  position: number,
-): Promise<void> {
-  // アップロードは独立なので並列で行う（Promise.all は投入順を保つ）
-  const results = await Promise.all(files.map((file) => upload(file)));
-  const paths = results.filter((path): path is string => path !== null);
-  if (paths.length === 0) {
-    return;
-  }
-  const snippet = imageEmbedSnippet(paths);
-  view.dispatch({
-    changes: { from: position, insert: snippet },
-    selection: { anchor: position + snippet.length },
-  });
-  view.focus();
-}
-
-/**
- * 画像のペースト / ドロップを検知する extension（M2）。
- * - paste: クリップボード内の画像をアップロードしてカーソル位置へ挿入する
- * - drop: ドロップ位置へ挿入する（画像ファイルのみ処理。他は既定動作に委ねる）
- * 画像が含まれないイベントは false を返し、通常のペースト/ドロップ動作を保つ
- * （既存のテキストペーストと衝突しない）。
- */
-function uploadExtension(onUploadImage: (file: File) => Promise<string | null>): Extension {
-  return EditorView.domEventHandlers({
-    paste(event, view) {
-      const files = imageFilesFrom(event.clipboardData);
-      if (files.length === 0) {
-        return false;
-      }
-      event.preventDefault();
-      void insertUploadedImages(view, files, onUploadImage, view.state.selection.main.head);
-      return true;
-    },
-    drop(event, view) {
-      const files = imageFilesFrom(event.dataTransfer);
-      if (files.length === 0) {
-        return false;
-      }
-      event.preventDefault();
-      // ドロップ位置へ挿入する（座標解決できない環境ではカーソル位置へ。レイアウト
-      // 未確定のテスト環境などで posAtCoords が例外を投げることがあるため防御する）
-      let position = view.state.selection.main.head;
-      try {
-        position = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? position;
-      } catch {
-        // カーソル位置のまま
-      }
-      void insertUploadedImages(view, files, onUploadImage, position);
-      return true;
-    },
-  });
 }

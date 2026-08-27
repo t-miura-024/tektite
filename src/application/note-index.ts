@@ -17,25 +17,29 @@
 
 import { Context, Effect, Layer } from 'effect';
 
-import { NoteFetchError, NoteGateway } from '@/application/note';
-import type { FileChange, NoteContent } from '@/application/note';
+import {
+  NoteGateway,
+  type FileChange,
+  type NoteContent,
+  type NoteFetchError,
+} from '@/application/note';
 import type { VaultRef } from '@/domain/vault';
 
 /** Vault 全ノートの共有メモリ索引（検索・クイックスイッチャー・バックリンクで共用） */
-export interface NoteIndex {
+export type NoteIndex = {
   readonly ref: VaultRef;
   readonly defaultBranch: string;
   readonly truncated: boolean;
   /** ノートパス → 内容（本文 + 取得時点の sha）。取得失敗ノートは含まれない */
   readonly notes: ReadonlyMap<string, NoteContent>;
-}
+};
 
 /**
  * ノート索引の共有レジストリ（Effect Service）。
  * このサービスを介せば、検索・クイックスイッチャー・バックリンクパネルが
  * 同一の索引インスタンス（NoteIndex.notes）を参照できる。
  */
-export interface NoteIndexRegistry {
+export type NoteIndexRegistry = {
   /** Vault の全ノートを取得してメモリ展開する（既に展開済みならそれを返す） */
   readonly load: (ref: VaultRef) => Effect.Effect<NoteIndex, NoteFetchError, NoteGateway>;
   /** 展開済みの索引を返す（未展開は null） */
@@ -49,7 +53,7 @@ export interface NoteIndexRegistry {
    * 本文が勝つ）。未展開は null。
    */
   readonly applyFileChanges: (ref: VaultRef, changes: readonly FileChange[]) => NoteIndex | null;
-}
+};
 export const NoteIndexRegistry = Context.GenericTag<NoteIndexRegistry>('tektite/NoteIndexRegistry');
 
 /** Vault を表すレジストリキー（owner/name で索引を分ける） */
@@ -74,18 +78,18 @@ export function createNoteIndexRegistry(): NoteIndexRegistry {
           return cached;
         }
         const gateway = yield* NoteGateway;
-        const data = yield* gateway.fetchAllNotes(ref);
+        const fetched = yield* gateway.fetchAllNotes(ref);
         const index: NoteIndex = {
           ref,
-          defaultBranch: data.defaultBranch,
-          truncated: data.truncated,
-          notes: new Map(data.notes.map((note) => [note.path, note])),
+          defaultBranch: fetched.defaultBranch,
+          truncated: fetched.truncated,
+          notes: new Map(fetched.notes.map((note) => [note.path, note])),
         };
         indexes.set(registryKey(ref), index);
         return index;
       }),
-    get: (ref) => indexes.get(registryKey(ref)) ?? null,
-    applySaved: (ref, notePath, content) => {
+    get: (ref): NoteIndex | null => indexes.get(registryKey(ref)) ?? null,
+    applySaved: (ref, notePath, content): NoteIndex | null => {
       const index = indexes.get(registryKey(ref));
       if (index === undefined) {
         return null;
@@ -100,7 +104,7 @@ export function createNoteIndexRegistry(): NoteIndexRegistry {
       indexes.set(registryKey(ref), next);
       return next;
     },
-    applyFileChanges: (ref, changes) => {
+    applyFileChanges: (ref, changes): NoteIndex | null => {
       const index = indexes.get(registryKey(ref));
       if (index === undefined) {
         return null;
@@ -109,25 +113,31 @@ export function createNoteIndexRegistry(): NoteIndexRegistry {
       for (const change of changes) {
         if (change.op === 'delete') {
           notes.delete(change.path);
-        } else if (change.op === 'move') {
+          continue;
+        }
+        if (change.op === 'move') {
           const source = notes.get(change.path);
+          // 本文は元パスのものを引き継ぐ（張り替え後の update が後続で上書きする）
           if (source !== undefined) {
-            // 本文は元パスのものを引き継ぐ（張り替え後の update が後続で上書きする）
             notes.set(change.to, { path: change.to, sha: '', content: source.content });
           }
           notes.delete(change.path);
-        } else if (change.op === 'copy') {
+          continue;
+        }
+        if (change.op === 'copy') {
           const source = notes.get(change.path);
+          // 複製は元の本文をそのまま引き継ぐ（WikiLink は張り替えない）
           if (source !== undefined) {
-            // 複製は元の本文をそのまま引き継ぐ（WikiLink は張り替えない）
             notes.set(change.to, { path: change.to, sha: '', content: source.content });
           }
-        } else if (change.op === 'create-binary') {
+          continue;
+        }
+        if (change.op === 'create-binary') {
           // 添付（画像）はノート索引の対象外（検索・クイックスイッチャーに混ぜない）
           notes.delete(change.path);
-        } else {
-          notes.set(change.path, { path: change.path, sha: '', content: change.content });
+          continue;
         }
+        notes.set(change.path, { path: change.path, sha: '', content: change.content });
       }
       const next = { ...index, notes };
       indexes.set(registryKey(ref), next);

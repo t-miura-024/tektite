@@ -15,10 +15,9 @@
 
 import { createRoute } from 'honox/factory';
 
-import type { RouteContext } from '@/api/_lib/route-context';
-import { AuthConfigError, resolveAuthConfig } from '@/api/_lib/env';
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
+import { isAuthConfigError, resolveAuthConfig } from '@/api/_lib/env';
 import { persistOAuthTokenPair } from '@/api/_lib/token-store';
-import type { OAuthTokenResponse } from '@/api/_lib/token-store';
 import {
   clearReturnToCookie,
   clearStateCookie,
@@ -26,12 +25,11 @@ import {
   verifyReturnToCookie,
   verifyStateCookie,
 } from '@/api/_lib/session';
-
-interface TokenResponseBody extends OAuthTokenResponse {
-  token_type?: string;
-  error?: string;
-  error_description?: string;
-}
+import {
+  exchangeCodeForToken,
+  extractTokenFields,
+  parseTokenBody,
+} from '@/api/_lib/callback-helpers';
 
 /** エラーコードを付与して SPA ルートへ戻す（state / return-to Cookie も破棄する） */
 function redirectToApp(errorCode: string): Response {
@@ -49,7 +47,7 @@ export async function handleCallbackGet(context: RouteContext): Promise<Response
   try {
     config = resolveAuthConfig(env);
   } catch (error) {
-    if (error instanceof AuthConfigError) {
+    if (isAuthConfigError(error)) {
       return Response.json(
         { error: 'auth_not_configured', message: error.message },
         { status: 500 },
@@ -74,43 +72,30 @@ export async function handleCallbackGet(context: RouteContext): Promise<Response
     return redirectToApp('oauth_state');
   }
 
-  // トークン交換は Workers 側のみ（ブラウザに client_secret / トークンは出さない）。
-  // GitHub は Accept を付けないと XML を返すため application/json を明示する。
-  let tokenResponse: Response;
-  try {
-    tokenResponse = await fetch(config.tokenUrl, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'tektite',
-      },
-      body: JSON.stringify({
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        code,
-        redirect_uri: config.redirectUri,
-        state,
-      }),
-    });
-  } catch {
+  const tokenResponse = await exchangeCodeForToken(
+    config.tokenUrl,
+    config.clientId,
+    config.clientSecret,
+    code,
+    config.redirectUri,
+    state,
+  );
+  if (tokenResponse === null) {
     return redirectToApp('oauth_exchange');
   }
-
-  // GitHub はトークン交換のエラーを 200 + { error } で返すことがある
-  const tokenBody = (await tokenResponse.json().catch(() => null)) as TokenResponseBody | null;
-  if (!tokenResponse.ok || !tokenBody || typeof tokenBody.access_token !== 'string') {
-    const errorCode =
-      tokenBody?.error === 'bad_verification_code' ? 'oauth_exchange' : 'oauth_denied';
-    return redirectToApp(errorCode);
+  const tokenBody: unknown = await tokenResponse.json().catch(() => null);
+  const { accessToken, errorCode } = parseTokenBody(tokenBody);
+  if (!tokenResponse.ok || typeof accessToken !== 'string') {
+    return redirectToApp(errorCode === 'bad_verification_code' ? 'oauth_exchange' : 'oauth_denied');
   }
+  const tokenFields = extractTokenFields(tokenBody, accessToken);
 
   const headers = new Headers();
   // ディープリンク復帰: 署名検証済みの return-to（未指定・不正時は "/"）へ戻す
   headers.set('Location', await verifyReturnToCookie(request, config.sessionSecret));
   headers.append(
     'Set-Cookie',
-    await createSessionCookie(config.sessionSecret, tokenBody.access_token),
+    await createSessionCookie(config.sessionSecret, tokenFields.access_token ?? accessToken),
   );
   headers.append('Set-Cookie', clearStateCookie());
   headers.append('Set-Cookie', clearReturnToCookie());
@@ -119,8 +104,9 @@ export async function handleCallbackGet(context: RouteContext): Promise<Response
   // サーバー側トークン保持（ADR-0007）: KV へ暗号化保存。失敗しても
   // ログインは妨げない（Cron 同期が動かないだけで、Cookie フローは従来通り）
   try {
-    await persistOAuthTokenPair(env, config, tokenBody);
+    await persistOAuthTokenPair(env, config, tokenFields);
   } catch (error) {
+    // oxlint-disable-next-line no-console -- KV 保存失敗の観測性のため維持（ベストエフォート）
     console.warn('[tektite] KV へのトークン保存をスキップしました:', error);
   }
 
@@ -128,5 +114,5 @@ export async function handleCallbackGet(context: RouteContext): Promise<Response
 }
 
 export const GET = createRoute((c) =>
-  handleCallbackGet({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleCallbackGet(toRouteContext(c.env, c.req.raw, c.req.param())),
 );

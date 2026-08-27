@@ -16,9 +16,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/_lib/github-proxy', () => ({
-  ProxyConfigError: class ProxyConfigError extends Error {
-    name = 'ProxyConfigError';
-  },
+  isProxyConfigError: (error: unknown): boolean =>
+    error instanceof Error && error.name === 'ProxyConfigError',
   resolveProxyConfig: mocks.resolveProxyConfig,
   authenticateRequest: mocks.authenticateRequest,
   githubApiFetch: mocks.githubApiFetch,

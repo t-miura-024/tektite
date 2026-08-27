@@ -8,12 +8,12 @@ import {
   TaskCheckboxWidget,
 } from '@/infra/editor/markdown-decoration';
 
-interface Found {
+type Found = {
   readonly from: number;
   readonly to: number;
   readonly className?: string;
   readonly widget?: TaskCheckboxWidget | HtmlBreakWidget | FrontmatterPropertyWidget;
-}
+};
 
 /** ドキュメントの装飾セットをクラス名と位置のリストに変換する */
 function collect(docText: string): Found[] {

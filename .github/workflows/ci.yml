@@ -23,7 +23,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: oxlint
+      - name: Lint (oxlint + typescript-eslint)
         run: pnpm lint
       - name: oxfmt (format check)
         run: pnpm format:check
@@ -34,6 +34,7 @@ jobs:
 
   e2e:
     name: Build / playwright-bdd (E2E)
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

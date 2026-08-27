@@ -10,6 +10,7 @@
  * コミットする（GitHub コミットフローは src/api/_lib/github-commit.ts）。
  */
 
+import { makeNamedError } from '@/api/_lib/error-object';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -21,9 +22,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/_lib/github-proxy', () => ({
-  ProxyConfigError: class ProxyConfigError extends Error {
-    name = 'ProxyConfigError';
-  },
+  isProxyConfigError: (error: unknown): boolean =>
+    error instanceof Error && error.name === 'ProxyConfigError',
   resolveProxyConfig: mocks.resolveProxyConfig,
   authenticateRequest: mocks.authenticateRequest,
   githubApiFetch: mocks.githubApiFetch,
@@ -32,18 +32,16 @@ vi.mock('@/api/_lib/github-proxy', () => ({
 }));
 
 import { handleCommitPost } from './commit';
-import { ProxyConfigError as MockedProxyConfigError } from '@/api/_lib/github-proxy';
 import { createFakeR2Bucket } from '@/api/_lib/fake-r2';
 import { sha256Hex } from '@/api/_lib/content-hash';
 import {
   readCachedNote,
-  readCachedRaw,
   readVaultTree,
   writeCachedNote,
-  writeCachedRaw,
   writeVaultMeta,
   writeVaultTree,
 } from '@/api/_lib/r2-vault';
+import { readCachedRaw, writeCachedRaw } from '@/api/_lib/r2-vault-assets';
 
 const ENV = {
   SESSION_SECRET: 'test-session-secret-0123456789abcdef',
@@ -452,7 +450,7 @@ describe('POST /api/files/:owner/:repo/commit', () => {
     expect(unauthorized.status).toBe(401);
 
     mocks.resolveProxyConfig.mockImplementation(() => {
-      throw new MockedProxyConfigError('未設定');
+      throw makeNamedError('ProxyConfigError', '未設定');
     });
     const notConfigured = await handleCommitPost(
       postContext(

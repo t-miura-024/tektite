@@ -10,9 +10,9 @@
 
 import { createRoute } from 'honox/factory';
 
-import type { RouteContext } from '@/api/_lib/route-context';
-import { generateOAuthState } from '@/infra/auth/oauth-state';
-import { AuthConfigError, GITHUB_AUTHORIZE_URL, resolveAuthConfig } from '@/api/_lib/env';
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
+import { generateOAuthState } from '@/domain/auth/oauth-state';
+import { GITHUB_AUTHORIZE_URL, isAuthConfigError, resolveAuthConfig } from '@/api/_lib/env';
 import { createStateCookie, createReturnToCookie, isSafeReturnTo } from '@/api/_lib/session';
 
 export async function handleLoginGet(context: RouteContext): Promise<Response> {
@@ -21,7 +21,7 @@ export async function handleLoginGet(context: RouteContext): Promise<Response> {
   try {
     config = resolveAuthConfig(env);
   } catch (error) {
-    if (error instanceof AuthConfigError) {
+    if (isAuthConfigError(error)) {
       return Response.json(
         { error: 'auth_not_configured', message: error.message },
         { status: 500 },
@@ -52,5 +52,5 @@ export async function handleLoginGet(context: RouteContext): Promise<Response> {
 }
 
 export const GET = createRoute((c) =>
-  handleLoginGet({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleLoginGet(toRouteContext(c.env, c.req.raw, c.req.param())),
 );

@@ -18,15 +18,11 @@ const mocks = vi.hoisted(() => ({
   persistOAuthTokenPair: vi.fn(),
 }));
 
-vi.mock('@/api/_lib/env', () => {
-  class AuthConfigError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = 'AuthConfigError';
-    }
-  }
-  return { AuthConfigError, resolveAuthConfig: mocks.resolveAuthConfig };
-});
+vi.mock('@/api/_lib/env', () => ({
+  isAuthConfigError: (error: unknown): boolean =>
+    error instanceof Error && error.name === 'AuthConfigError',
+  resolveAuthConfig: mocks.resolveAuthConfig,
+}));
 
 vi.mock('@/api/_lib/session', () => ({
   clearReturnToCookie: mocks.clearReturnToCookie,

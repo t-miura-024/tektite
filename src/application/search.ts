@@ -19,25 +19,25 @@
 import MiniSearch from 'minisearch';
 
 /** 検索対象の 1 ノート（NoteIndex と記法索引のタグを統合した形） */
-export interface SearchableNote {
+export type SearchableNote = {
   readonly path: string;
   readonly content: string;
   readonly tags: readonly string[];
-}
+};
 
 /** 一致種別（本文 > ファイル名 > タグ の優先順。ソートに使う） */
 export type SearchHitKind = 'content' | 'name' | 'tag';
 
 /** ハイライト断片（text の一部または全部を <mark> で強調する） */
-export interface SnippetPart {
+export type SnippetPart = {
   /** スニペット内の開始オフセット（React の key に使う。省略記号は負値） */
   readonly from: number;
   readonly text: string;
   readonly highlight: boolean;
-}
+};
 
 /** 検索結果 1 件 */
-export interface SearchHit {
+export type SearchHit = {
   readonly path: string;
   readonly kind: SearchHitKind;
   /** MiniSearch の BM25 スコア（同種別内の並び順に使う） */
@@ -46,12 +46,12 @@ export interface SearchHit {
   readonly snippet: readonly SnippetPart[] | null;
   /** タグ一致のみ: クエリに一致したタグ（原表記） */
   readonly matchedTags: readonly string[];
-}
+};
 
 /** 検索 API（タイピングごとに search を呼ぶ。同期で十分高速） */
-export interface NoteSearcher {
+export type NoteSearcher = {
   readonly search: (query: string) => readonly SearchHit[];
-}
+};
 
 /** 一度に表示する結果の上限（個人 Vault では十分） */
 const MAX_RESULTS = 50;
@@ -71,16 +71,12 @@ function tokenize(text: string): string[] {
   return tokens;
 }
 
-function kindOrder(kind: SearchHitKind): number {
-  switch (kind) {
-    case 'content':
-      return 0;
-    case 'name':
-      return 1;
-    case 'tag':
-      return 2;
-  }
-}
+/** 一致種別のソート優先度（本文 > ファイル名 > タグ） */
+const KIND_ORDER: Record<SearchHitKind, number> = {
+  content: 0,
+  name: 1,
+  tag: 2,
+};
 
 /** クエリ語（トークン）がすべて含まれるか */
 function containsAll(haystack: string, queryTerms: readonly string[]): boolean {
@@ -122,14 +118,14 @@ export function highlightParts(text: string, queryTerms: readonly string[]): Sni
   const lower = text.toLowerCase();
   const marks: Array<{ from: number; to: number }> = [];
   for (const term of terms) {
-    let from = 0;
-    while (from < lower.length) {
-      const found = lower.indexOf(term, from);
-      if (found === -1) {
-        break;
+    // indexOf ループの代わりに matchAll で全出現を列挙する（正規表現特殊文字はエスケープ）
+    const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    for (const match of lower.matchAll(pattern)) {
+      const found = match.index ?? -1;
+      if (found < 0) {
+        continue;
       }
       marks.push({ from: found, to: found + term.length });
-      from = found + term.length;
     }
   }
   marks.sort((a, b) => a.from - b.from || b.to - a.to);
@@ -138,9 +134,9 @@ export function highlightParts(text: string, queryTerms: readonly string[]): Sni
     const last = merged.at(-1);
     if (last !== undefined && mark.from <= last.to) {
       last.to = Math.max(last.to, mark.to);
-    } else {
-      merged.push({ ...mark });
+      continue;
     }
+    merged.push({ ...mark });
   }
   const parts: SnippetPart[] = [];
   let cursor = 0;
@@ -221,7 +217,7 @@ export function createNoteSearcher(notes: readonly SearchableNote[]): NoteSearch
     })),
   );
   return {
-    search: (query) => {
+    search: (query): readonly SearchHit[] => {
       const trimmed = query.trim();
       if (trimmed.length === 0) {
         return [];
@@ -229,7 +225,8 @@ export function createNoteSearcher(notes: readonly SearchableNote[]): NoteSearch
       const results = miniSearch.search(trimmed);
       const hits: SearchHit[] = [];
       for (const result of results) {
-        const note = byPath.get(result.id as string);
+        // id フィールドは path（文字列）で登録しているため String() で復元する
+        const note = byPath.get(String(result.id));
         if (note === undefined) {
           continue;
         }
@@ -242,7 +239,7 @@ export function createNoteSearcher(notes: readonly SearchableNote[]): NoteSearch
           matchedTags: kind === 'tag' ? matchedTagsOf(note.tags, result.queryTerms) : [],
         });
       }
-      hits.sort((a, b) => kindOrder(a.kind) - kindOrder(b.kind) || b.score - a.score);
+      hits.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.score - a.score);
       return hits.slice(0, MAX_RESULTS);
     },
   };

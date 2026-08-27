@@ -5,8 +5,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildSnippet, createNoteSearcher, highlightParts } from '@/application/search';
-import type { SearchableNote } from '@/application/search';
+import {
+  buildSnippet,
+  createNoteSearcher,
+  highlightParts,
+  type SearchableNote,
+} from '@/application/search';
 
 const notes: SearchableNote[] = [
   {

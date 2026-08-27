@@ -32,40 +32,16 @@
 
 import { createRoute } from 'honox/factory';
 
-import type { RouteContext } from '@/api/_lib/route-context';
-import { isValidGitHubName } from '@/domain/vault';
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
 import {
-  ProxyConfigError,
   authenticateRequest,
-  githubApiFetch,
-  githubUnreachable,
-  mapGithubFailure,
+  isProxyConfigError,
   resolveProxyConfig,
 } from '@/api/_lib/github-proxy';
-import {
-  listCachedNotePaths,
-  readVaultMeta,
-  writeCachedNote,
-  writeVaultMeta,
-  writeVaultTree,
-} from '@/api/_lib/r2-vault';
+import { isValidGitHubName } from '@/domain/vault';
+import { readVaultMeta } from '@/api/_lib/r2-vault';
 import { syncVault } from '@/api/_lib/vault-sync';
-interface GithubRepoInfo {
-  default_branch?: unknown;
-  permissions?: { push?: unknown };
-}
-
-interface GithubTreeEntry {
-  path?: unknown;
-  type?: unknown;
-  sha?: unknown;
-}
-
-interface GithubTreeResponse {
-  sha?: unknown;
-  truncated?: unknown;
-  tree?: GithubTreeEntry[];
-}
+import { performInitialSync } from '@/api/_lib/vault-initial-sync';
 
 /** パスパラメータを文字列に正規化する（配列で渡された場合は先頭を採用） */
 function paramToString(value: string | string[] | undefined): string {
@@ -75,81 +51,72 @@ function paramToString(value: string | string[] | undefined): string {
   return value ?? '';
 }
 
-/** GitHub Blobs API の base64 本文を UTF-8 文字列に復号する */
-function decodeBase64Content(encoded: string): string {
-  const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+async function parseExplicitSyncFlag(request: Request): Promise<boolean> {
+  let rawBody = '';
+  try {
+    rawBody = await request.text();
+  } catch {
+    return false;
+  }
+  if (rawBody.length === 0) {
+    return false;
+  }
+  let action: unknown = null;
+  try {
+    const parsedBody: unknown = JSON.parse(rawBody);
+    if (typeof parsedBody === 'object' && parsedBody !== null && 'action' in parsedBody) {
+      action = parsedBody.action;
+    }
+  } catch {
+    return false;
+  }
+  return action === 'sync';
 }
 
-/** Blob 取得の最大試行回数（一時的な失敗はリトライで吸収する） */
-const BLOB_FETCH_RETRIES = 3;
-
-/**
- * Blob 1 件を取得して本文を返す（リトライ後も失敗・404・形式不正は null）。
- *
- * 初期同期で取得に失敗したノートを「欠落」させると、その後の同期 push が
- * 「R2 に無い = 削除」と誤認する事故（2026-08-16 の大量削除）につながる。
- * 一時的な失敗（ネットワーク断・レートリミットの突発的な発生）はリトライで
- * 吸収する。
- */
-async function fetchBlobContent(
-  baseUrl: string,
-  token: string,
+async function handleExistingVault(
+  request: Request,
+  bucket: R2Bucket,
   owner: string,
   repoName: string,
-  sha: string,
-): Promise<string | null> {
-  for (let attempt = 1; attempt <= BLOB_FETCH_RETRIES; attempt += 1) {
-    let response: Response;
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- リトライを伴う逐次取得が意図のため
-      response = await githubApiFetch(
-        baseUrl,
-        `/repos/${owner}/${repoName}/git/blobs/${encodeURIComponent(sha)}`,
-        token,
-      );
-    } catch {
-      if (attempt < BLOB_FETCH_RETRIES) {
-        // oxlint-disable-next-line no-await-in-loop -- リトライ間隔のバックオフ待機のため
-        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-        continue;
-      }
-      return null;
-    }
-    if (!response.ok) {
-      if (attempt < BLOB_FETCH_RETRIES) {
-        // oxlint-disable-next-line no-await-in-loop -- リトライ間隔のバックオフ待機のため
-        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-        continue;
-      }
-      return null;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- リトライを伴う逐次取得が意図のため
-    const body = (await response.json().catch(() => null)) as {
-      content?: unknown;
-      encoding?: unknown;
-    } | null;
-    if (!body || body.encoding !== 'base64' || typeof body.content !== 'string') {
-      return null;
-    }
-    return decodeBase64Content(body.content);
+  config: { apiBaseUrl: string },
+  token: string,
+  existingMeta: { defaultBranch: string },
+): Promise<Response | null> {
+  const isExplicitSync = await parseExplicitSyncFlag(request);
+  if (!isExplicitSync) {
+    return Response.json(
+      {
+        owner,
+        name: repoName,
+        status: 'already_synced',
+        defaultBranch: existingMeta.defaultBranch,
+        notes: 0,
+      },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
   }
-  return null;
+  const outcome = await syncVault(config.apiBaseUrl, token, bucket, owner, repoName, 'explicit');
+  if (!outcome.ok) {
+    if (outcome.reason === 'sync_conflict') {
+      return Response.json({ error: 'sync_conflict' }, { status: 409 });
+    }
+    return outcome.response;
+  }
+  return Response.json(
+    {
+      owner,
+      name: repoName,
+      status: outcome.result.status,
+      defaultBranch: existingMeta.defaultBranch,
+      syncedAt: outcome.result.syncedAt,
+      pulled: outcome.result.pulled,
+      pushed: outcome.result.pushed,
+      conflicts: outcome.result.conflicts,
+      remaining: outcome.result.remaining,
+    },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }
-
-/** Markdown blob 並列取得の同時実行上限（GitHub のレートリミット消費を抑える） */
-const BLOB_FETCH_CONCURRENCY = 8;
-
-/**
- * 1 リクエストで取得する blob 数の上限（同期のチャンク化。2026-08-16 の事故後）。
- *
- * Cloudflare Workers Free プランの外部 fetch サブリクエスト制限（50 件/リクエスト）
- * を超過しないための安全値。1 リクエストは「ツリー取得 + repo 取得 + blob 取得」を
- * 行うため、blob 側を 40 件に抑えても合計 42 件程度になる。大量のノートがある
- * Vault は 1 リクエストで全量を取得せず、レスポンスの `remaining` を見て
- * クライアントが複数リクエストに分割して取得する。
- */
-const SYNC_FETCH_LIMIT = 40;
 
 export async function handleVaultSyncPost(context: RouteContext): Promise<Response> {
   const { env, request, params } = context;
@@ -158,7 +125,6 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
   if (!isValidGitHubName(owner) || !isValidGitHubName(repoName)) {
     return Response.json({ error: 'invalid_vault_ref' }, { status: 400 });
   }
-
   const bucket = env.VAULT_BUCKET;
   if (!bucket) {
     return Response.json(
@@ -166,12 +132,11 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
       { status: 503 },
     );
   }
-
   let config;
   try {
     config = resolveProxyConfig(env);
   } catch (error) {
-    if (error instanceof ProxyConfigError) {
+    if (isProxyConfigError(error)) {
       return Response.json(
         { error: 'auth_not_configured', message: error.message },
         { status: 503 },
@@ -179,233 +144,36 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
     }
     throw error;
   }
-
   const auth = await authenticateRequest(request, config);
   if (!auth.ok) {
     return auth.response;
   }
-
-  // 既に初期同期済みの Vault:
-  // - body に action: 'sync' がある（明示同期。M5）: ツリー sha 比較でプルし、
-  //   未反映の変更を 1 コミットに束ねてプッシュする（GitHub API の消費はツリー
-  //   1 回 + 変更 blob のみ）
-  // - action なし（Vault オープン時の初期同期チェック）: GitHub に一切触れず
-  //   already_synced を返す（Vault を開くだけでは GitHub API を消費しない）
   const existingMeta = await readVaultMeta(bucket, owner, repoName);
   if (existingMeta !== null) {
-    let rawBody = '';
-    try {
-      rawBody = await request.text();
-    } catch {
-      rawBody = '';
-    }
-    let isExplicitSync = false;
-    if (rawBody.length > 0) {
-      let parsed: { action?: unknown } | null = null;
-      try {
-        parsed = JSON.parse(rawBody) as { action?: unknown };
-      } catch {
-        parsed = null;
-      }
-      isExplicitSync = parsed?.action === 'sync';
-    }
-    if (!isExplicitSync) {
-      return Response.json(
-        {
-          owner,
-          name: repoName,
-          status: 'already_synced',
-          defaultBranch: existingMeta.defaultBranch,
-          notes: 0,
-        },
-        { headers: { 'Cache-Control': 'no-store' } },
-      );
-    }
-    const outcome = await syncVault(
-      config.apiBaseUrl,
-      auth.token,
+    const response = await handleExistingVault(
+      request,
       bucket,
       owner,
       repoName,
-      'explicit',
-    );
-    if (!outcome.ok) {
-      if (outcome.reason === 'sync_conflict') {
-        // 明示同期は conflicts を返して UI に解決させるため、ここには来ない
-        // （防衛線）
-        return Response.json({ error: 'sync_conflict' }, { status: 409 });
-      }
-      return outcome.response;
-    }
-    return Response.json(
-      {
-        owner,
-        name: repoName,
-        status: outcome.result.status,
-        defaultBranch: existingMeta.defaultBranch,
-        syncedAt: outcome.result.syncedAt,
-        pulled: outcome.result.pulled,
-        pushed: outcome.result.pushed,
-        conflicts: outcome.result.conflicts,
-        remaining: outcome.result.remaining,
-      },
-      { headers: { 'Cache-Control': 'no-store' } },
-    );
-  }
-
-  // 1) リポジトリ情報からデフォルトブランチと write 権限を確認する
-  let repoResponse: Response;
-  try {
-    repoResponse = await githubApiFetch(
-      config.apiBaseUrl,
-      `/repos/${owner}/${repoName}`,
+      config,
       auth.token,
+      existingMeta,
     );
-  } catch {
-    return githubUnreachable();
-  }
-  const repoFailure = mapGithubFailure(repoResponse);
-  if (repoFailure) {
-    return repoFailure;
-  }
-  const repoInfo = (await repoResponse.json().catch(() => null)) as GithubRepoInfo | null;
-  if (
-    !repoInfo ||
-    typeof repoInfo.default_branch !== 'string' ||
-    repoInfo.default_branch.length === 0
-  ) {
-    return Response.json({ error: 'github_error' }, { status: 502 });
-  }
-  if (repoInfo.permissions?.push !== true) {
-    return Response.json(
-      { error: 'read_only_vault', message: 'この Vault には書き込み権限がありません。' },
-      { status: 403 },
-    );
-  }
-  const defaultBranch = repoInfo.default_branch;
-
-  // 2) ツリー全体を取得する（コミット 0 件の空リポジトリは 404 → 空ツリー）
-  let treeResponse: Response;
-  try {
-    treeResponse = await githubApiFetch(
-      config.apiBaseUrl,
-      `/repos/${owner}/${repoName}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`,
-      auth.token,
-    );
-  } catch {
-    return githubUnreachable();
-  }
-  const treeFailure = mapGithubFailure(treeResponse);
-  let treeBody: GithubTreeResponse;
-  if (treeResponse.status === 404) {
-    treeBody = { sha: null, truncated: false, tree: [] };
-  } else {
-    if (treeFailure) {
-      return treeFailure;
-    }
-    const parsed = (await treeResponse.json().catch(() => null)) as GithubTreeResponse | null;
-    if (!parsed || !Array.isArray(parsed.tree)) {
-      return Response.json({ error: 'github_error' }, { status: 502 });
-    }
-    treeBody = parsed;
-  }
-
-  // 3) Markdown blob の path + sha を抽出する（検索対象は Note のみ）
-  const treeEntries = treeBody.tree ?? [];
-  const noteBlobs: { path: string; sha: string }[] = [];
-  const entries: { path: string; type: 'file' | 'directory'; sha: string | null }[] = [];
-  for (const entry of treeEntries) {
-    if (typeof entry.path !== 'string' || entry.path.length === 0) {
-      continue;
-    }
-    if (entry.type === 'blob') {
-      entries.push({
-        path: entry.path,
-        type: 'file',
-        sha: typeof entry.sha === 'string' && entry.sha.length > 0 ? entry.sha : null,
-      });
-      if (entry.path.endsWith('.md') && typeof entry.sha === 'string' && entry.sha.length > 0) {
-        noteBlobs.push({ path: entry.path, sha: entry.sha });
-      }
-    } else if (entry.type === 'tree') {
-      entries.push({ path: entry.path, type: 'directory', sha: null });
+    if (response !== null) {
+      return response;
     }
   }
-
-  // 4) Markdown blob をチャンク取得して R2 へ書き込む（1 リクエスト最大
-  //    SYNC_FETCH_LIMIT 件。Workers Free の外部 fetch 50 件制限を守るための
-  //    チャンク化。メタが無いうちは読み取りが GitHub 直行のままなので、既に
-  //    取得済みのノートは R2 に存在し、次回の呼び出しで自然にスキップされる）。
-  //    取得に失敗したノートがある場合は初期同期を失敗させる。部分成功のまま
-  //    完了マーカー（meta）を書くと、R2 が不完全な状態で「R2 が正」になり、
-  //    その後の同期が誤動作する（2026-08-16 の大量削除事故の再発防止）。
-  //    失敗時は meta が無いため、次回の初期同期で未取得分がやり直される
-  const existingPaths = await listCachedNotePaths(bucket, owner, repoName);
-  const pendingBlobs = noteBlobs.filter(({ path }) => !existingPaths.has(path));
-  const fetchTargets = pendingBlobs.slice(0, SYNC_FETCH_LIMIT);
-
-  let notes = 0;
-  for (let offset = 0; offset < fetchTargets.length; offset += BLOB_FETCH_CONCURRENCY) {
-    const chunk = fetchTargets.slice(offset, offset + BLOB_FETCH_CONCURRENCY);
-    // oxlint-disable-next-line no-await-in-loop -- 同時実行数を 8 に制限する意図的なチャンク処理
-    const chunkResults = await Promise.all(
-      chunk.map(async ({ path, sha }) => {
-        const content = await fetchBlobContent(config.apiBaseUrl, auth.token, owner, repoName, sha);
-        return content === null ? null : { path, sha, content };
-      }),
-    );
-    for (const result of chunkResults) {
-      if (result === null) {
-        return Response.json(
-          {
-            error: 'github_error',
-            message: 'ノートの取得に失敗しました。しばらくしてからもう一度お試しください。',
-          },
-          { status: 502 },
-        );
-      }
-      // oxlint-disable-next-line no-await-in-loop -- 取得済みノートの R2 書き込み（チャンク内で順次実行）のため
-      await writeCachedNote(bucket, owner, repoName, result.path, {
-        sha: result.sha,
-        content: result.content,
-      });
-      notes += 1;
-    }
-  }
-
-  // 4') 未取得のノートが残っている場合は完了マーカーとツリーを書かずに中断し、
-  //     残件数を返してクライアントに続きを促す（チャンク化。冪等なため、
-  //     クライアントが同一リクエストを繰り返すだけで残りが消化される）
-  const remaining = pendingBlobs.length - fetchTargets.length;
-  if (remaining > 0) {
-    return Response.json(
-      { owner, name: repoName, status: 'syncing', defaultBranch, remaining },
-      { headers: { 'Cache-Control': 'no-store' } },
-    );
-  }
-
-  // 5) ツリー + 同期完了マーカーを書き込む（M5 は meta.treeSha で差分を検出する）
-  const treeSha = typeof treeBody.sha === 'string' && treeBody.sha.length > 0 ? treeBody.sha : null;
-  await writeVaultTree(bucket, owner, repoName, {
-    defaultBranch,
-    truncated: treeBody.truncated === true,
-    treeSha,
-    entries,
+  return performInitialSync({
+    bucket,
+    owner,
+    repoName,
+    apiBaseUrl: config.apiBaseUrl,
+    token: auth.token,
   });
-  await writeVaultMeta(bucket, owner, repoName, {
-    syncedAt: new Date().toISOString(),
-    defaultBranch,
-    treeSha,
-  });
-
-  return Response.json(
-    { owner, name: repoName, status: 'initialized', defaultBranch, notes },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
 }
 
 export const POST = createRoute((c) =>
-  handleVaultSyncPost({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleVaultSyncPost(toRouteContext(c.env, c.req.raw, c.req.param())),
 );
 
 /** パスパラメータのヘルパー（handleVaultSyncGet / resolve で使う） */
@@ -463,5 +231,5 @@ export async function handleVaultSyncGet(context: RouteContext): Promise<Respons
 }
 
 export const GET = createRoute((c) =>
-  handleVaultSyncGet({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleVaultSyncGet(toRouteContext(c.env, c.req.raw, c.req.param())),
 );

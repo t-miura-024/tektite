@@ -3,15 +3,19 @@
  *
  * セッション状態は暗号化 Cookie のみ（ADR-0002）。OAuth の state も
  * 署名付き Cookie に保存し、サーバー側ストレージは一切使わない。
- * 暗号・署名の実体は src/infra/auth（WebCrypto・純 TS）を再利用する。
+ * 暗号・署名の実体は src/domain/auth（WebCrypto・純 TS）を再利用する。
  */
 
 // バレル（index）ではなく個別モジュールから import し、
 // ブラウザ専用コード（session-gateway）を Workers バンドルに引き込まない。
-import { expireCookie, parseCookies, serializeCookie } from '@/infra/auth/cookies';
-import type { CookieOptions } from '@/infra/auth/cookies';
-import { signOAuthState, verifyOAuthState } from '@/infra/auth/oauth-state';
-import { decryptSecretPayload, encryptSecretPayload } from '@/infra/auth/session-crypto';
+import {
+  expireCookie,
+  parseCookies,
+  serializeCookie,
+  type CookieOptions,
+} from '@/domain/auth/cookies';
+import { signOAuthState, verifyOAuthState } from '@/domain/auth/oauth-state';
+import { decryptSecretPayload, encryptSecretPayload } from '@/domain/auth/session-crypto';
 
 export const SESSION_COOKIE_NAME = 'tektite_session';
 export const OAUTH_STATE_COOKIE_NAME = 'tektite_oauth_state';

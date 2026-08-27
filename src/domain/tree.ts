@@ -12,37 +12,37 @@ import type { VaultRef } from '@/domain/vault';
 export type TreeEntryType = 'file' | 'directory';
 
 /** Git Trees API などから得られるフラットなエントリ */
-export interface TreeEntry {
+export type TreeEntry = {
   readonly path: string;
   readonly type: TreeEntryType;
-}
+};
 
-export interface TreeFile {
+export type TreeFile = {
   readonly type: 'file';
   /** 最終セグメントの表示名 */
   readonly name: string;
   /** Vault ルートからのパス（/ 区切り） */
   readonly path: string;
-}
+};
 
-export interface TreeDirectory {
+export type TreeDirectory = {
   readonly type: 'directory';
   readonly name: string;
   readonly path: string;
   /** ディレクトリ優先・名前順でソート済み */
   readonly children: readonly TreeNode[];
-}
+};
 
 export type TreeNode = TreeFile | TreeDirectory;
 
 /** 構築済みの Vault ファイルツリー */
-export interface VaultTree {
+export type VaultTree = {
   readonly ref: VaultRef;
   readonly defaultBranch: string;
   /** Git Trees API が truncated を返した場合 true（巨大リポジトリ） */
   readonly truncated: boolean;
   readonly root: TreeDirectory;
-}
+};
 
 function isHiddenSegment(segment: string): boolean {
   return segment.startsWith('.');
@@ -89,12 +89,12 @@ function compareByName(a: { name: string }, b: { name: string }): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 }
 
-interface MutableDirectory {
+type MutableDirectory = {
   readonly name: string;
   readonly path: string;
   readonly directories: Map<string, MutableDirectory>;
   readonly files: Map<string, string>;
-}
+};
 
 function createMutableDirectory(name: string, path: string): MutableDirectory {
   return { name, path, directories: new Map(), files: new Map() };

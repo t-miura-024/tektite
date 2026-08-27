@@ -10,17 +10,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthConfig } from '@/api/_lib/env';
 import {
-  TokenRefreshError,
   deleteTokenPair,
   getServerAccessToken,
   isAccessTokenExpired,
+  isTokenRefreshError,
   persistOAuthTokenPair,
   readTokenPair,
   refreshOAuthToken,
   saveTokenPair,
   tokenKeyForLogin,
+  type StoredTokenPair,
 } from '@/api/_lib/token-store';
-import type { StoredTokenPair } from '@/api/_lib/token-store';
 
 const SESSION_SECRET = 'test-session-secret-0123456789abcdef';
 const API_BASE_URL = 'http://mock.invalid';
@@ -195,15 +195,18 @@ describe('refreshOAuthToken', () => {
 
   it('エラー応答（200 + { error } または 4xx）は TokenRefreshError を投げる', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'invalid_grant' }));
-    await expect(refreshOAuthToken(CONFIG, 'ghr_expired')).rejects.toThrow(TokenRefreshError);
+    const grantError = await refreshOAuthToken(CONFIG, 'ghr_expired').catch((e: unknown) => e);
+    expect(isTokenRefreshError(grantError)).toBe(true);
 
     fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Bad credentials' }, 401));
-    await expect(refreshOAuthToken(CONFIG, 'ghr_bad')).rejects.toThrow(TokenRefreshError);
+    const badCredentialError = await refreshOAuthToken(CONFIG, 'ghr_bad').catch((e: unknown) => e);
+    expect(isTokenRefreshError(badCredentialError)).toBe(true);
   });
 
   it('ネットワーク到達失敗は TokenRefreshError を投げる', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
-    await expect(refreshOAuthToken(CONFIG, 'ghr_refresh')).rejects.toThrow(TokenRefreshError);
+    const networkError = await refreshOAuthToken(CONFIG, 'ghr_refresh').catch((e: unknown) => e);
+    expect(isTokenRefreshError(networkError)).toBe(true);
   });
 });
 

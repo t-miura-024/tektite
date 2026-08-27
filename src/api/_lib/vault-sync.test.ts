@@ -22,29 +22,22 @@ vi.mock('@/api/_lib/github-proxy', () => ({
   mapGithubFailure: mocks.mapGithubFailure,
 }));
 
-import {
-  gitBlobShaHex,
-  listSyncedVaults,
-  recordSyncFailure,
-  resolveSyncConflict,
-  syncVault,
-} from './vault-sync';
+import { listSyncedVaults, recordSyncFailure, syncVault } from './vault-sync';
+import { resolveSyncConflict } from './vault-sync-resolve';
+import { gitBlobShaHex } from './vault-sync-pull';
 import { sha256Hex } from './content-hash';
 import {
-  applyVaultTreeChanges,
   deleteCachedNote,
-  deleteCachedRaw,
-  isVaultDeleted,
-  markVaultDeleted,
-  markVaultDirty,
   readCachedNote,
   readVaultMeta,
   readVaultTree,
   writeCachedNote,
-  writeCachedRaw,
   writeVaultMeta,
   writeVaultTree,
 } from './r2-vault';
+import { applyVaultTreeChanges } from './r2-vault-tree-apply';
+import { deleteCachedRaw, writeCachedRaw } from './r2-vault-assets';
+import { isVaultDeleted, markVaultDeleted, markVaultDirty } from './r2-vault-marks';
 import { createFakeR2Bucket } from './fake-r2';
 
 const BASE_URL = 'http://mock.invalid';
@@ -195,7 +188,9 @@ describe('syncVault（プル: ツリー sha 比較）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     expect(outcome.result).toMatchObject({ pulled: 0, pushed: 0, conflicts: [] });
     expect(outcome.result.syncedAt).toBe('2026-08-13T02:00:00.000Z');
     // meta のツリー sha と失敗記録が更新されている
@@ -218,7 +213,9 @@ describe('syncVault（プル: ツリー sha 比較）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     expect(outcome.result.pulled).toBe(1);
     expect(await readCachedNote(bucket, OWNER, REPO, 'new.md')).toEqual({
       sha: 'sha-new',
@@ -253,7 +250,9 @@ describe('syncVault（プル: ツリー sha 比較）', () => {
     // 1 回目: 40 件まで取り込み、残り 1 件を返す（meta はまだ更新されない）
     const first = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(first.ok).toBe(true);
-    if (!first.ok) return;
+    if (!first.ok) {
+      return;
+    }
     expect(first.result.status).toBe('syncing');
     expect(first.result.remaining).toBe(1);
     expect(first.result.pulled).toBe(40);
@@ -263,7 +262,9 @@ describe('syncVault（プル: ツリー sha 比較）', () => {
     // 2 回目: 残り 1 件を取り込み、完了する
     const second = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(second.ok).toBe(true);
-    if (!second.ok) return;
+    if (!second.ok) {
+      return;
+    }
     expect(second.result.status).toBe('synced');
     expect(second.result.pulled).toBe(1);
     const metaAfterSecond = await readVaultMeta(bucket, OWNER, REPO);
@@ -283,7 +284,9 @@ describe('syncVault（プル: ツリー sha 比較）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     expect(outcome.result.pulled).toBe(1);
     expect(await readCachedNote(bucket, OWNER, REPO, 'a.md')).toEqual({
       sha: 'sha-a2',
@@ -301,7 +304,9 @@ describe('syncVault（プル: ツリー sha 比較）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     expect(outcome.result.pulled).toBe(1);
     expect(await readCachedNote(bucket, OWNER, REPO, 'b.md')).toBeNull();
   });
@@ -326,7 +331,9 @@ describe('syncVault（同期衝突）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     expect(outcome.result.conflicts).toEqual([
       { path: 'a.md', local: '# A local\n', remote: '# A remote\n', remoteSha: 'sha-a2' },
     ]);
@@ -357,7 +364,9 @@ describe('syncVault（同期衝突）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'scheduled', FIXED_NOW);
     expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
+    if (outcome.ok) {
+      return;
+    }
     expect(outcome.reason).toBe('sync_conflict');
     // R2 は一切変更されていない
     expect(await readCachedNote(bucket, OWNER, REPO, 'a.md')).toEqual({
@@ -396,7 +405,9 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     expect(outcome.result.pushed).toBe(1);
     // blobs API（GitHub 側）への POST が 1 件あり、コミット・ref 更新まで到達している
     const blobPosts = mocks.githubApiFetch.mock.calls.filter(
@@ -434,7 +445,9 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     expect(outcome.result.pushed).toBe(2);
     const blobPosts = mocks.githubApiFetch.mock.calls.filter(
       ([, path, , init]) => String(path).endsWith('/git/blobs') && init?.method === 'POST',
@@ -476,7 +489,9 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     // b.md は復活しない（pulled は GitHub 新規追加の new.md のみ）
     expect(outcome.result.pulled).toBe(1);
     expect(await readCachedNote(bucket, OWNER, REPO, 'b.md')).toBeNull();
@@ -532,7 +547,9 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     // 添付はプルの対象外（.md のみ）のため pulled 0、push で削除のみ反映される
     expect(outcome.result.pulled).toBe(0);
     expect(outcome.result.pushed).toBe(1);
@@ -573,7 +590,9 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      return;
+    }
     // image.png の削除は push されない（変更なし扱い）
     expect(outcome.result.pushed).toBe(0);
     const treePosts = mocks.githubApiFetch.mock.calls.filter(
@@ -603,7 +622,9 @@ describe('syncVault（プッシュ: R2 の未反映変更）', () => {
 
     const outcome = await syncVault(BASE_URL, 'token', bucket, OWNER, REPO, 'explicit', FIXED_NOW);
     expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
+    if (outcome.ok) {
+      return;
+    }
     expect(outcome.reason).toBe('too_many_deletes');
     // GitHub へのコミットは発生していない（誤削除の防波堤）
     const commitPosts = mocks.githubApiFetch.mock.calls.filter(
@@ -765,7 +786,9 @@ describe('resolveSyncConflict', () => {
       'overwrite',
     );
     expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
+    if (outcome.ok) {
+      return;
+    }
     expect(outcome.response.status).toBe(404);
   });
 });

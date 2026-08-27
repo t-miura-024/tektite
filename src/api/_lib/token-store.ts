@@ -15,18 +15,19 @@
  *   その環境ではサーバー側トークン保持が無効になる（Cookie フローは従来通り）
  */
 
-import { decryptSecretPayload, encryptSecretPayload } from '@/infra/auth/session-crypto';
+import { isErrorNamed, makeNamedError } from '@/api/_lib/error-object';
+import { decryptSecretPayload, encryptSecretPayload } from '@/domain/auth/session-crypto';
 import type { AuthConfig } from '@/api/_lib/env';
 import { githubApiFetch } from '@/api/_lib/github-proxy';
 
 /** KV に保存するトークンペア（保存対象はアクセストークン + リフレッシュトークンの最小限） */
-export interface StoredTokenPair {
+export type StoredTokenPair = {
   accessToken: string;
   /** GitHub が refresh_token を発行しない従来型トークンの場合は undefined */
   refreshToken?: string;
   /** アクセストークンの有効期限（epoch ms）。GitHub が expires_in を返さない場合は無期限 */
   expiresAt?: number;
-}
+};
 
 const KV_KEY_PREFIX = 'token:';
 
@@ -38,11 +39,15 @@ function isStoredTokenPair(value: unknown): value is StoredTokenPair {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate.accessToken === 'string' &&
-    (candidate.refreshToken === undefined || typeof candidate.refreshToken === 'string') &&
-    (candidate.expiresAt === undefined || typeof candidate.expiresAt === 'number')
+    'accessToken' in value &&
+    typeof value.accessToken === 'string' &&
+    (!('refreshToken' in value) ||
+      value.refreshToken === undefined ||
+      typeof value.refreshToken === 'string') &&
+    (!('expiresAt' in value) ||
+      value.expiresAt === undefined ||
+      typeof value.expiresAt === 'number')
   );
 }
 
@@ -92,18 +97,24 @@ export function isAccessTokenExpired(pair: StoredTokenPair, now: number): boolea
 }
 
 /** トークン交換（callback）レスポンスのうち保存に使うフィールド */
-export interface OAuthTokenResponse {
+export type OAuthTokenResponse = {
   access_token?: string;
   refresh_token?: string;
   expires_in?: number;
   scope?: string;
+};
+
+/** トークンリフレッシュの失敗（network / invalid_grant） */
+export type TokenRefreshError = Error;
+
+/** TokenRefreshError を生成するファクトリ */
+export function tokenRefreshError(reason: string): TokenRefreshError {
+  return makeNamedError('TokenRefreshError', reason);
 }
 
-export class TokenRefreshError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'TokenRefreshError';
-  }
+/** error が TokenRefreshError かどうか */
+export function isTokenRefreshError(error: unknown): error is TokenRefreshError {
+  return isErrorNamed(error, 'TokenRefreshError');
 }
 
 /**
@@ -133,18 +144,40 @@ export async function refreshOAuthToken(
       }),
     });
   } catch {
-    throw new TokenRefreshError('network');
+    throw tokenRefreshError('network');
   }
-  const body = (await response.json().catch(() => null)) as OAuthTokenResponse | null;
-  if (!response.ok || !body || typeof body.access_token !== 'string') {
+  const body: unknown = await response.json().catch(() => null);
+  const accessToken =
+    typeof body === 'object' && body !== null && 'access_token' in body
+      ? body.access_token
+      : undefined;
+  if (!response.ok || typeof accessToken !== 'string') {
     // 無効・失効済みの refresh token（GitHub は 200 + { error } または 4xx で返す）
-    throw new TokenRefreshError('invalid_grant');
+    throw tokenRefreshError('invalid_grant');
   }
+  return buildStoredTokenPair(body, accessToken);
+}
+
+/** OAuth 応答から KV 保存用のトークンペアを組み立てる */
+function buildStoredTokenPair(body: unknown, accessToken: string): StoredTokenPair {
+  const refreshToken =
+    typeof body === 'object' &&
+    body !== null &&
+    'refresh_token' in body &&
+    typeof body.refresh_token === 'string'
+      ? body.refresh_token
+      : undefined;
+  const expiresIn =
+    typeof body === 'object' &&
+    body !== null &&
+    'expires_in' in body &&
+    typeof body.expires_in === 'number'
+      ? body.expires_in
+      : undefined;
   return {
-    accessToken: body.access_token,
-    refreshToken: body.refresh_token,
-    expiresAt:
-      typeof body.expires_in === 'number' ? Date.now() + body.expires_in * 1000 : undefined,
+    accessToken,
+    refreshToken,
+    expiresAt: expiresIn === undefined ? undefined : Date.now() + expiresIn * 1000,
   };
 }
 
@@ -219,12 +252,26 @@ export async function persistOAuthTokenPair(
   if (!userResponse.ok) {
     return false;
   }
-  const user = (await userResponse.json().catch(() => null)) as { login?: unknown } | null;
-  if (!user || typeof user.login !== 'string' || user.login.length === 0) {
+  const user: unknown = await userResponse.json().catch(() => null);
+  const login =
+    typeof user === 'object' && user !== null && 'login' in user && typeof user.login === 'string'
+      ? user.login
+      : null;
+  if (login === null || login.length === 0) {
     return false;
   }
-  await saveTokenPair(kv, config.sessionSecret, user.login, {
-    accessToken: tokenBody.access_token,
+  return persistTokenPair(kv, config.sessionSecret, login, tokenBody);
+}
+
+/** 検証済みトークンペアを KV へ暗号化保存する */
+async function persistTokenPair(
+  kv: KVNamespace,
+  sessionSecret: string,
+  login: string,
+  tokenBody: OAuthTokenResponse,
+): Promise<boolean> {
+  await saveTokenPair(kv, sessionSecret, login, {
+    accessToken: tokenBody.access_token ?? '',
     refreshToken: tokenBody.refresh_token,
     expiresAt:
       typeof tokenBody.expires_in === 'number'

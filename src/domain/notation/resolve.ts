@@ -20,14 +20,14 @@
  */
 
 /** ノート本文中の見出しの位置 */
-export interface HeadingPosition {
+export type HeadingPosition = {
   /** 見出しテキスト（`#` マーカーと ATX クロージングを除いたもの） */
   readonly text: string;
   /** 見出し行の開始オフセット（UTF-16 コード単位） */
   readonly from: number;
   /** 見出しレベル（1-6） */
   readonly level: number;
-}
+};
 
 /** 見出し: `#` 〜 `######` */
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
@@ -47,11 +47,10 @@ export function resolveNotePath(target: string, filePaths: readonly string[]): s
   const candidates: string[] = [];
   for (const path of filePaths) {
     const lower = path.toLowerCase();
-    if (hasExtension) {
-      if (lower === lowerTarget) {
-        candidates.push(path);
-      }
-    } else if (lower === `${lowerTarget}.md` || lower.endsWith(`/${lowerTarget}.md`)) {
+    const matched = hasExtension
+      ? lower === lowerTarget
+      : lower === `${lowerTarget}.md` || lower.endsWith(`/${lowerTarget}.md`);
+    if (matched) {
       candidates.push(path);
     }
   }

@@ -17,9 +17,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/_lib/github-proxy', () => ({
-  ProxyConfigError: class ProxyConfigError extends Error {
-    name = 'ProxyConfigError';
-  },
+  isProxyConfigError: (error: unknown): boolean =>
+    error instanceof Error && error.name === 'ProxyConfigError',
   resolveProxyConfig: mocks.resolveProxyConfig,
   authenticateRequest: mocks.authenticateRequest,
   githubApiFetch: mocks.githubApiFetch,
@@ -27,10 +26,10 @@ vi.mock('@/api/_lib/github-proxy', () => ({
   mapGithubFailure: mocks.mapGithubFailure,
 }));
 
-// eslint-disable-next-line import/first -- vi.mock は import より前に置く必要がある
 import { handleRawGet } from './[path]';
 import { createFakeR2Bucket } from '@/api/_lib/fake-r2';
-import { readCachedRaw, writeCachedRaw, writeVaultMeta, writeVaultTree } from '@/api/_lib/r2-vault';
+import { writeVaultMeta, writeVaultTree } from '@/api/_lib/r2-vault';
+import { readCachedRaw, writeCachedRaw } from '@/api/_lib/r2-vault-assets';
 
 const ENV = {
   SESSION_SECRET: 'test-session-secret-0123456789abcdef',

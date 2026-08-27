@@ -1,51 +1,69 @@
 /**
- * セッション検証: GET /api/auth/me
+ * セッション状態確認: GET /api/auth/me。
  *
- * UI がログイン状態を確認するエンドポイント。
- * OAuth モードでは暗号化 Cookie を復号し、トークンで GitHub /user を確認してログイン名を返す。
- * PAT モード（TEKTITE_PAT_AUTH=true かつ GITHUB_PERSONAL_TOKEN 設定）では OAuth 変数が
- * 不要なまま /user を PAT で呼び、ログイン済みとして返す（PAT 優先、Cookie は無視）。
- *
- * - 未ログイン / Cookie 復号失敗        → 401 { authenticated: false }
- * - トークン失効（GitHub が 401）        → Cookie を削除して 401
- * - GitHub API 障害                      → 502（UI はトースト + リトライ）
- * - 正常                                 → 200 { authenticated: true, login }
+ * 暗号化セッション Cookie を復号し、GitHub /user でトークンの有効性を確認する
+ * （ADR-0002）。トークンが無効化されていた場合はセッション Cookie を破棄して
+ * 未ログイン扱いにする。PAT モード（ローカル専用フォールバック）では
+ * セッション Cookie を読まず常に PAT を使う。
  */
 
 import { createRoute } from 'honox/factory';
 
-import type { RouteContext } from '@/api/_lib/route-context';
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
 import { isPatModeEnabled } from '@/api/_lib/github-proxy';
-import { AuthConfigError, resolveAuthConfig } from '@/api/_lib/env';
+import { isAuthConfigError, resolveAuthConfig } from '@/api/_lib/env';
 import { clearSessionCookie, readAccessToken } from '@/api/_lib/session';
 
-interface GitHubUserResponseBody {
-  login?: string;
+/** API 呼び出しに使う認証情報（PAT モードは OAuth 変数を必要としない） */
+type MeCredentials = {
+  readonly apiBaseUrl: string;
+  readonly accessToken: string | null;
+};
+
+/**
+ * 認証情報を解決する。設定不備（OAuth 変数未設定）は未ログイン扱いの
+ * 401 応答として返す。
+ */
+async function resolveCredentials(env: Env, request: Request): Promise<MeCredentials | Response> {
+  if (isPatModeEnabled(env)) {
+    return {
+      apiBaseUrl: env.GITHUB_API_BASE_URL ?? 'https://api.github.com',
+      accessToken: env.GITHUB_PERSONAL_TOKEN ?? null,
+    };
+  }
+  let config;
+  try {
+    config = resolveAuthConfig(env);
+  } catch (error) {
+    if (isAuthConfigError(error)) {
+      // 未設定ではセッションを復号できないため未ログイン扱いにする
+      // （ログイン操作時に auth_not_configured エラーが表面化する）
+      return Response.json({ authenticated: false }, { status: 401 });
+    }
+    throw error;
+  }
+  return {
+    apiBaseUrl: config.apiBaseUrl,
+    accessToken: await readAccessToken(request, config.sessionSecret),
+  };
+}
+
+/** GitHub /user の応答からログイン名を読む（形式不正は null） */
+function readLogin(body: unknown): string | null {
+  if (typeof body === 'object' && body !== null && 'login' in body) {
+    const login = body.login;
+    return typeof login === 'string' && login.length > 0 ? login : null;
+  }
+  return null;
 }
 
 export async function handleMeGet(context: RouteContext): Promise<Response> {
   const { env, request } = context;
-  // PAT モードは OAuth 変数を必要としない（PAT 優先: セッション Cookie は無視）
-  let apiBaseUrl: string;
-  let accessToken: string | null;
-  if (isPatModeEnabled(env)) {
-    apiBaseUrl = env.GITHUB_API_BASE_URL ?? 'https://api.github.com';
-    accessToken = env.GITHUB_PERSONAL_TOKEN ?? null;
-  } else {
-    let config;
-    try {
-      config = resolveAuthConfig(env);
-    } catch (error) {
-      if (error instanceof AuthConfigError) {
-        // 未設定ではセッションを復号できないため未ログイン扱いにする
-        // （ログイン操作時に auth_not_configured エラーが表面化する）
-        return Response.json({ authenticated: false }, { status: 401 });
-      }
-      throw error;
-    }
-    apiBaseUrl = config.apiBaseUrl;
-    accessToken = await readAccessToken(request, config.sessionSecret);
+  const credentials = await resolveCredentials(env, request);
+  if (credentials instanceof Response) {
+    return credentials;
   }
+  const { apiBaseUrl, accessToken } = credentials;
 
   if (!accessToken) {
     return Response.json({ authenticated: false }, { status: 401 });
@@ -75,17 +93,15 @@ export async function handleMeGet(context: RouteContext): Promise<Response> {
     return Response.json({ error: 'github_error' }, { status: 502 });
   }
 
-  const user = (await userResponse.json().catch(() => null)) as GitHubUserResponseBody | null;
-  if (!user || typeof user.login !== 'string' || user.login.length === 0) {
+  const login = readLogin(await userResponse.json().catch(() => null));
+  if (login === null) {
     return Response.json({ error: 'github_error' }, { status: 502 });
   }
 
   return Response.json(
-    { authenticated: true, login: user.login },
+    { authenticated: true, login },
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }
 
-export const GET = createRoute((c) =>
-  handleMeGet({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
-);
+export const GET = createRoute((c) => handleMeGet(toRouteContext(c.env, c.req.raw, c.req.param())));

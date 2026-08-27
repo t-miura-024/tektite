@@ -2,12 +2,14 @@ import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  SessionFetchError,
-  SessionGateway,
   getCurrentSession,
+  isSessionFetchError,
   logout,
+  sessionFetchError,
+  SessionGateway,
+  type Session,
+  type SessionFetchError,
 } from '@/application/session';
-import type { Session } from '@/application/session';
 
 function createGatewayStub(session: Session): SessionGateway {
   return {
@@ -43,7 +45,7 @@ describe('session ユースケース', () => {
     const gateway: SessionGateway = {
       getCurrentSession: vi
         .fn<() => Effect.Effect<Session, SessionFetchError>>()
-        .mockReturnValue(Effect.fail(new SessionFetchError('セッション確認に失敗しました。'))),
+        .mockReturnValue(Effect.fail(sessionFetchError('セッション確認に失敗しました。'))),
       logout: vi.fn<() => Effect.Effect<void, SessionFetchError>>(),
     };
     const result = await Effect.runPromise(
@@ -51,7 +53,7 @@ describe('session ユースケース', () => {
     );
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(SessionFetchError);
+      expect(isSessionFetchError(result.left)).toBe(true);
     }
   });
 

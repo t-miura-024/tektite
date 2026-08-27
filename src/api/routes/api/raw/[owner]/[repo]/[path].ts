@@ -1,3 +1,12 @@
+import { createRoute } from 'honox/factory';
+
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
+import {
+  isProxyConfigError,
+  authenticateRequest,
+  resolveProxyConfig,
+} from '@/api/_lib/github-proxy';
+import { fetchRawFromGithub, tryServeRawFromR2 } from '@/api/_lib/raw-helpers';
 /**
  * 画像・添付ファイルの raw 配信: GET /api/raw/:owner/:repo/:path
  *
@@ -19,19 +28,7 @@
  * - 正常                           → 200（バイナリ本文 + Content-Type）
  */
 
-import { createRoute } from 'honox/factory';
-
-import type { RouteContext } from '@/api/_lib/route-context';
 import { isValidGitHubName } from '@/domain/vault';
-import {
-  ProxyConfigError,
-  authenticateRequest,
-  githubApiFetch,
-  githubUnreachable,
-  mapGithubFailure,
-  resolveProxyConfig,
-} from '@/api/_lib/github-proxy';
-import { readCachedRaw, readVaultMeta, readVaultTree, writeCachedRaw } from '@/api/_lib/r2-vault';
 
 /** パスパラメータを文字列に正規化する（配列で渡された場合は先頭を採用） */
 function paramToString(value: string | string[] | undefined): string {
@@ -75,17 +72,15 @@ export async function handleRawGet(context: RouteContext): Promise<Response> {
   if (!isValidGitHubName(owner) || !isValidGitHubName(repoName)) {
     return Response.json({ error: 'invalid_vault_ref' }, { status: 400 });
   }
-
   const rawPath = resolveRawPath(params.path);
   if (rawPath === null) {
     return Response.json({ error: 'invalid_raw_path' }, { status: 400 });
   }
-
   let config;
   try {
     config = resolveProxyConfig(env);
   } catch (error) {
-    if (error instanceof ProxyConfigError) {
+    if (isProxyConfigError(error)) {
       return Response.json(
         { error: 'auth_not_configured', message: error.message },
         { status: 503 },
@@ -93,76 +88,26 @@ export async function handleRawGet(context: RouteContext): Promise<Response> {
     }
     throw error;
   }
-
   const auth = await authenticateRequest(request, config);
   if (!auth.ok) {
     return auth.response;
   }
-
-  // R2 が正: 初期同期済み（メタあり）の Vault は添付を R2 から返す。
-  // R2 に無い Attachment のみ GitHub から取得して書き戻す（遅延キャッシュ）
   const bucket = env.VAULT_BUCKET;
-  if (bucket) {
-    const meta = await readVaultMeta(bucket, owner, repoName);
-    if (meta !== null) {
-      const cached = await readCachedRaw(bucket, owner, repoName, rawPath);
-      if (cached !== null) {
-        return new Response(cached.body, {
-          headers: {
-            'Content-Type': cached.contentType,
-            'Cache-Control': 'public, max-age=300',
-          },
-        });
-      }
-      // ツリーキャッシュに載っていないパスは Vault に存在しない（削除済み・
-      // 作成前）。GitHub フォールバックで復活させない（R2 が正のため。
-      // ツリー未キャッシュの Vault は従来どおり GitHub へフォールバックする）
-      const tree = await readVaultTree(bucket, owner, repoName);
-      if (tree !== null && !tree.entries.some((entry) => entry.path === rawPath)) {
-        return Response.json({ error: 'not_found' }, { status: 404 });
-      }
-    }
+  const cachedResponse = await tryServeRawFromR2(bucket, owner, repoName, rawPath);
+  if (cachedResponse !== null) {
+    return cachedResponse;
   }
-
-  let response: Response;
-  try {
-    response = await githubApiFetch(
-      config.apiBaseUrl,
-      `/repos/${owner}/${repoName}/contents/${encodeRawPath(rawPath)}`,
-      auth.token,
-      { headers: { Accept: 'application/vnd.github.raw' } },
-    );
-  } catch {
-    return githubUnreachable();
-  }
-  const failure = mapGithubFailure(response);
-  if (failure) {
-    return failure;
-  }
-
-  // 画像はコミットで更新されうるが、短期キャッシュで API 呼び出しを抑える
-  const contentType = response.headers.get('Content-Type') ?? 'application/octet-stream';
-
-  // 遅延キャッシュ: 初期同期済み Vault は、GitHub から取得した添付を R2 へ
-  // 書き戻す（メタなし = 未同期の Vault は書き込まない）
-  if (bucket) {
-    const meta = await readVaultMeta(bucket, owner, repoName);
-    if (meta !== null) {
-      const body = await response
-        .clone()
-        .arrayBuffer()
-        .catch(() => null);
-      if (body !== null) {
-        await writeCachedRaw(bucket, owner, repoName, rawPath, body, contentType);
-      }
-    }
-  }
-
-  return new Response(response.body, {
-    headers: { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=300' },
-  });
+  return fetchRawFromGithub(
+    bucket,
+    owner,
+    repoName,
+    rawPath,
+    config.apiBaseUrl,
+    auth.token,
+    encodeRawPath,
+  );
 }
 
 export const GET = createRoute((c) =>
-  handleRawGet({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleRawGet(toRouteContext(c.env, c.req.raw, c.req.param())),
 );

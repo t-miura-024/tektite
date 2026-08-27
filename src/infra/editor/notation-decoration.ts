@@ -17,30 +17,24 @@
  * しているため、ここでも装飾されない。
  */
 
-import { RangeSetBuilder, StateField } from '@codemirror/state';
-import type { Extension, Text } from '@codemirror/state';
-import { Decoration, EditorView } from '@codemirror/view';
-import type { DecorationSet } from '@codemirror/view';
+import { RangeSetBuilder, StateField, type Extension, type Text } from '@codemirror/state';
+import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 
-import { parseNotation } from '@/domain/notation/parse';
-import type { NotationSpan } from '@/domain/notation/parse';
+import { parseNotation, type NotationSpan } from '@/domain/notation/parse';
 import { resolveNotePath } from '@/domain/notation/resolve';
 
-/** 解析結果 1 件を対応する Decoration に変換する（該当なしは null） */
+/** スパン種別ごとの装飾クラス（テーブル駆動） */
 function toNotationDecoration(span: NotationSpan, filePaths: readonly string[]): Decoration | null {
-  switch (span.kind) {
-    case 'wikilink': {
-      const resolved = resolveNotePath(span.target, filePaths);
-      const broken = resolved === null || !resolved.endsWith('.md');
-      return Decoration.mark({ class: broken ? 'tk-wikilink tk-wikilink-broken' : 'tk-wikilink' });
-    }
-    case 'embed': {
-      const broken = resolveNotePath(span.target, filePaths) === null;
-      return Decoration.mark({ class: broken ? 'tk-embed tk-embed-broken' : 'tk-embed' });
-    }
-    case 'tag':
-      return Decoration.mark({ class: 'tk-tag' });
+  if (span.kind === 'wikilink') {
+    const resolved = resolveNotePath(span.target, filePaths);
+    const broken = resolved === null || !resolved.endsWith('.md');
+    return Decoration.mark({ class: broken ? 'tk-wikilink tk-wikilink-broken' : 'tk-wikilink' });
   }
+  if (span.kind === 'embed') {
+    const broken = resolveNotePath(span.target, filePaths) === null;
+    return Decoration.mark({ class: broken ? 'tk-embed tk-embed-broken' : 'tk-embed' });
+  }
+  return Decoration.mark({ class: 'tk-tag' });
 }
 
 /**

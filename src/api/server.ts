@@ -16,13 +16,14 @@ import { createApp } from 'honox/server';
 import type { ViteDevServer } from 'vite';
 import indexHtml from '../../index.html?raw';
 
-import { AuthConfigError, resolveAuthConfig } from '@/api/_lib/env';
+import { isAuthConfigError, resolveAuthConfig, type AuthConfig } from '@/api/_lib/env';
 import { getServerAccessToken } from '@/api/_lib/token-store';
 import {
   listSyncedVaults,
   recordSyncFailure,
   syncVault,
   type SyncFailureReason,
+  type VaultRefMeta,
 } from '@/api/_lib/vault-sync';
 
 // Hono の Env 型（Bindings / Variables）に合わせて Bindings に tektite の Env を指定する。
@@ -48,6 +49,7 @@ app.notFound(async (c) => {
   if (c.req.path.startsWith('/api')) {
     return c.json({ error: 'not_found' }, 404);
   }
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- HonoX の dev サーバー連携（vite）はフレームワークが Env へ動的合成するため境界で確定する
   const env = c.env as Env & { vite?: ViteDevServer };
   if (env.vite) {
     // dev: Vite の HTML 変換を適用して返す（/src/ui/main.tsx の解決と HMR）
@@ -83,9 +85,76 @@ app.notFound(async (c) => {
  * ユーザー不在のためデータ保護を優先し、その Vault の同期を中断する（明示同期で
  * 解決するまで自動リトライされ続ける）。
  */
+/** トークン取得失敗理由を SyncFailureReason へ写像する（kv_missing は区別して記録） */
+function failureReasonOfToken(
+  reason: 'kv_missing' | 'no_token' | 'no_refresh_token' | 'refresh_failed',
+): SyncFailureReason {
+  if (reason === 'refresh_failed') {
+    return 'refresh_failed';
+  }
+  if (reason === 'kv_missing') {
+    return 'kv_missing';
+  }
+  return 'no_token';
+}
+
+/** Vault 1 件の定時同期を実行し、進捗と失敗を標準出力 / meta へ記録する */
+async function syncOneVault(
+  env: Env,
+  config: AuthConfig,
+  bucket: R2Bucket,
+  vault: VaultRefMeta,
+): Promise<void> {
+  const label = `${vault.owner}/${vault.repo}`;
+  try {
+    // oxlint-disable-next-line no-await-in-loop -- トークン取得（Vault 単位の逐次実行）のため
+    const tokenResult = await getServerAccessToken(env, config, vault.owner);
+    if (!tokenResult.ok) {
+      const reason = failureReasonOfToken(tokenResult.reason);
+      // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
+      console.error(`[tektite] scheduled sync: ${label} トークン取得失敗（${reason}）`);
+      await recordSyncFailure(bucket, vault.owner, vault.repo, reason);
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- 同期実行（Vault 単位の逐次実行）のため
+    const outcome = await syncVault(
+      config.apiBaseUrl,
+      tokenResult.accessToken,
+      bucket,
+      vault.owner,
+      vault.repo,
+      'scheduled',
+    );
+    if (!outcome.ok) {
+      // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
+      console.error(`[tektite] scheduled sync: ${label} 失敗（${outcome.reason}）`);
+      await recordSyncFailure(bucket, vault.owner, vault.repo, outcome.reason);
+      return;
+    }
+    if (outcome.result.status === 'syncing') {
+      // チャンク化により 1 回の Cron で処理しきれない差分が残っている。
+      // 冪等なので次回 Cron で続きが消化される
+      // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
+      console.log(
+        `[tektite] scheduled sync: ${label} 途中（remaining=${outcome.result.remaining}, pulled=${outcome.result.pulled}）`,
+      );
+      return;
+    }
+    // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
+    console.log(
+      `[tektite] scheduled sync: ${label} 完了（pulled=${outcome.result.pulled}, pushed=${outcome.result.pushed}）`,
+    );
+  } catch (error) {
+    // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
+    console.error(`[tektite] scheduled sync: ${label} 予期しないエラー`, error);
+    await recordSyncFailure(bucket, vault.owner, vault.repo, 'github_error');
+  }
+}
+
 export async function runScheduledSync(env: Env): Promise<void> {
   const bucket = env.VAULT_BUCKET;
   if (!bucket) {
+    // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
     console.log('[tektite] scheduled sync: VAULT_BUCKET が未設定のためスキップ');
     return;
   }
@@ -93,7 +162,8 @@ export async function runScheduledSync(env: Env): Promise<void> {
   try {
     config = resolveAuthConfig(env);
   } catch (error) {
-    if (error instanceof AuthConfigError) {
+    if (isAuthConfigError(error)) {
+      // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
       console.error(`[tektite] scheduled sync: 設定エラー（${error.message}）`);
       return;
     }
@@ -104,62 +174,7 @@ export async function runScheduledSync(env: Env): Promise<void> {
   // ため。1 Vault の失敗が他へ影響しないよう try-catch を Vault 単位で区切る）
   for (const vault of vaults) {
     // oxlint-disable-next-line no-await-in-loop -- 定時同期は Vault 単位の逐次実行が意図（レート消費を平準化）
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- トークン取得（Vault 単位の逐次実行）のため
-      const tokenResult = await getServerAccessToken(env, config, vault.owner);
-      if (!tokenResult.ok) {
-        // トークン取得失敗理由を SyncFailureReason へ写像する。kv_missing（KV
-        // バインディング未設定）は no_token へ潰さず区別して記録する（設定ミスの
-        // 切り分けのため。no_refresh_token は no_token に含める）
-        const reason: SyncFailureReason =
-          tokenResult.reason === 'refresh_failed'
-            ? 'refresh_failed'
-            : tokenResult.reason === 'kv_missing'
-              ? 'kv_missing'
-              : 'no_token';
-        console.error(
-          `[tektite] scheduled sync: ${vault.owner}/${vault.repo} トークン取得失敗（${reason}）`,
-        );
-        // oxlint-disable-next-line no-await-in-loop -- 失敗記録（Vault 単位の逐次実行）のため
-        await recordSyncFailure(bucket, vault.owner, vault.repo, reason);
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- 同期実行（Vault 単位の逐次実行）のため
-      const outcome = await syncVault(
-        config.apiBaseUrl,
-        tokenResult.accessToken,
-        bucket,
-        vault.owner,
-        vault.repo,
-        'scheduled',
-      );
-      if (!outcome.ok) {
-        console.error(
-          `[tektite] scheduled sync: ${vault.owner}/${vault.repo} 失敗（${outcome.reason}）`,
-        );
-        // oxlint-disable-next-line no-await-in-loop -- 失敗記録（Vault 単位の逐次実行）のため
-        await recordSyncFailure(bucket, vault.owner, vault.repo, outcome.reason);
-        continue;
-      }
-      if (outcome.result.status === 'syncing') {
-        // チャンク化（Workers Free のサブリクエスト制限）により、1 回の Cron では
-        // 処理しきれない差分が残っている。冪等なので次回 Cron で続きが消化される
-        console.log(
-          `[tektite] scheduled sync: ${vault.owner}/${vault.repo} 途中（remaining=${outcome.result.remaining}, pulled=${outcome.result.pulled}）`,
-        );
-        continue;
-      }
-      console.log(
-        `[tektite] scheduled sync: ${vault.owner}/${vault.repo} 完了（pulled=${outcome.result.pulled}, pushed=${outcome.result.pushed}）`,
-      );
-    } catch (error) {
-      console.error(
-        `[tektite] scheduled sync: ${vault.owner}/${vault.repo} 予期しないエラー`,
-        error,
-      );
-      // oxlint-disable-next-line no-await-in-loop -- 失敗記録（Vault 単位の逐次実行）のため
-      await recordSyncFailure(bucket, vault.owner, vault.repo, 'github_error');
-    }
+    await syncOneVault(env, config, bucket, vault);
   }
 }
 
@@ -168,8 +183,10 @@ export async function runScheduledSync(env: Env): Promise<void> {
  * （runScheduledSync）を実行する（M5）。
  */
 const worker = {
-  fetch: (request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, env, ctx),
-  scheduled: (controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> =>
+    app.fetch(request, env, ctx),
+  scheduled: (controller: ScheduledController, env: Env, ctx: ExecutionContext): void => {
+    // oxlint-disable-next-line no-console -- Cloudflare Workers の標準出力ログ（Cron 観測性のため維持）
     console.log(`[tektite] scheduled handler: ${controller.cron}（定時同期を開始）`);
     ctx.waitUntil(runScheduledSync(env));
   },

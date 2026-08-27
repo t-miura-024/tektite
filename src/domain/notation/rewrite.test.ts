@@ -7,8 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { planLinkRewrite } from '@/domain/notation/rewrite';
-import type { MovePair } from '@/domain/notation/rewrite';
+import { planLinkRewrite, type MovePair } from '@/domain/notation/rewrite';
 
 function plan(moves: readonly MovePair[], contents: Map<string, string>, filePaths: string[]) {
   return planLinkRewrite({ moves, contents, filePaths });

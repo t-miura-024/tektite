@@ -22,11 +22,15 @@
 
 import { createRoute } from 'honox/factory';
 
-import type { RouteContext } from '@/api/_lib/route-context';
+import { toRouteContext, type RouteContext } from '@/api/_lib/route-context';
+import {
+  authenticateRequest,
+  isProxyConfigError,
+  resolveProxyConfig,
+} from '@/api/_lib/github-proxy';
 import { isValidGitHubName } from '@/domain/vault';
-import { ProxyConfigError, authenticateRequest, resolveProxyConfig } from '@/api/_lib/github-proxy';
 import { readVaultMeta } from '@/api/_lib/r2-vault';
-import { resolveSyncConflict } from '@/api/_lib/vault-sync';
+import { resolveSyncConflict } from '@/api/_lib/vault-sync-resolve';
 
 /** パスパラメータを文字列に正規化する（配列で渡された場合は先頭を採用） */
 function paramToString(value: string | string[] | undefined): string {
@@ -34,6 +38,29 @@ function paramToString(value: string | string[] | undefined): string {
     return value[0] ?? '';
   }
   return value ?? '';
+}
+
+/** ボディから path と resolution を読む（形式不正は null） */
+async function readRequestBody(
+  request: Request,
+): Promise<{ path: string; resolution: 'overwrite' | 'adopt' } | null> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return null;
+  }
+  if (typeof body !== 'object' || body === null || !('path' in body) || !('resolution' in body)) {
+    return null;
+  }
+  const { path, resolution } = body;
+  if (typeof path !== 'string' || path.length === 0) {
+    return null;
+  }
+  if (resolution !== 'overwrite' && resolution !== 'adopt') {
+    return null;
+  }
+  return { path, resolution };
 }
 
 export async function handleVaultSyncResolvePost(context: RouteContext): Promise<Response> {
@@ -48,7 +75,7 @@ export async function handleVaultSyncResolvePost(context: RouteContext): Promise
   try {
     config = resolveProxyConfig(env);
   } catch (error) {
-    if (error instanceof ProxyConfigError) {
+    if (isProxyConfigError(error)) {
       return Response.json(
         { error: 'auth_not_configured', message: error.message },
         { status: 503 },
@@ -76,18 +103,11 @@ export async function handleVaultSyncResolvePost(context: RouteContext): Promise
     return Response.json({ error: 'not_synced' }, { status: 409 });
   }
 
-  const body = (await request.json().catch(() => null)) as {
-    path?: unknown;
-    resolution?: unknown;
-  } | null;
-  if (
-    !body ||
-    typeof body.path !== 'string' ||
-    body.path.length === 0 ||
-    (body.resolution !== 'overwrite' && body.resolution !== 'adopt')
-  ) {
+  const parsed = await readRequestBody(request);
+  if (parsed === null) {
     return Response.json({ error: 'invalid_body' }, { status: 400 });
   }
+  const { path, resolution } = parsed;
 
   const outcome = await resolveSyncConflict(
     config.apiBaseUrl,
@@ -95,18 +115,18 @@ export async function handleVaultSyncResolvePost(context: RouteContext): Promise
     bucket,
     owner,
     repoName,
-    body.path,
-    body.resolution,
+    path,
+    resolution,
   );
   if (!outcome.ok) {
     return outcome.response;
   }
   return Response.json(
-    { owner, name: repoName, path: body.path, resolution: body.resolution, sha: outcome.sha },
+    { owner, name: repoName, path, resolution, sha: outcome.sha },
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }
 
 export const POST = createRoute((c) =>
-  handleVaultSyncResolvePost({ env: c.env as Env, request: c.req.raw, params: c.req.param() }),
+  handleVaultSyncResolvePost(toRouteContext(c.env, c.req.raw, c.req.param())),
 );

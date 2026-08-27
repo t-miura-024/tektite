@@ -3,23 +3,20 @@
  * エラー UX 基本方針: トースト表示 + リトライ導線。
  */
 
-import { FileCommitError, NoteFetchError, NoteSaveError } from '@/application/note';
-import { VaultFetchError } from '@/application/vault';
+import { isFileCommitError, isNoteFetchError, isNoteSaveError } from '@/application/note';
+import { isVaultFetchError, type VaultFetchErrorKind } from '@/application/vault';
+
+/** Vault 取得エラー（server 以外）のメッセージテーブル */
+const VAULT_FETCH_MESSAGES: Record<Exclude<VaultFetchErrorKind, 'server'>, string> = {
+  unauthenticated: 'セッションの有効期限が切れました。ログインし直してください。',
+  rate_limited: 'GitHub API のレートリミットに達しました。しばらくしてから再試行してください。',
+  not_found: 'Vault が見つかりませんでした。',
+  network: 'サーバーと通信できませんでした。接続を確認してください。',
+};
 
 export function vaultErrorMessage(error: unknown): string {
-  if (error instanceof VaultFetchError) {
-    switch (error.kind) {
-      case 'unauthenticated':
-        return 'セッションの有効期限が切れました。ログインし直してください。';
-      case 'rate_limited':
-        return 'GitHub API のレートリミットに達しました。しばらくしてから再試行してください。';
-      case 'not_found':
-        return 'Vault が見つかりませんでした。';
-      case 'network':
-        return 'サーバーと通信できませんでした。接続を確認してください。';
-      case 'server':
-        return error.message;
-    }
+  if (isVaultFetchError(error)) {
+    return error.kind === 'server' ? error.message : VAULT_FETCH_MESSAGES[error.kind];
   }
   return '予期しないエラーが発生しました。';
 }
@@ -31,10 +28,10 @@ export function vaultErrorMessage(error: unknown): string {
  */
 export function isSessionExpiredError(error: unknown): boolean {
   return (
-    (error instanceof VaultFetchError ||
-      error instanceof NoteFetchError ||
-      error instanceof NoteSaveError ||
-      error instanceof FileCommitError) &&
+    (isVaultFetchError(error) ||
+      isNoteFetchError(error) ||
+      isNoteSaveError(error) ||
+      isFileCommitError(error)) &&
     error.kind === 'unauthenticated'
   );
 }

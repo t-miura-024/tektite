@@ -18,14 +18,14 @@ import { parseNotation, type Frontmatter } from '@/domain/notation/parse';
 import { findHeading, resolveNotePath, type HeadingPosition } from '@/domain/notation/resolve';
 
 /** 索引の入力ノート（本文付き） */
-export interface NoteRecord {
+export type NoteRecord = {
   /** Vault ルートからのノートパス（/ 区切り） */
   readonly path: string;
   readonly content: string;
-}
+};
 
 /** ノートが持つリンク 1 件（WikiLink / Embed 共通） */
-export interface LinkRef {
+export type LinkRef = {
   readonly kind: 'wikilink' | 'embed';
   /** Embed のターゲット種別（画像かノートか）。WikiLink は 'note' */
   readonly targetType: 'note' | 'image';
@@ -40,19 +40,19 @@ export interface LinkRef {
   /** 本文中の出現位置（オフセットはフロントマテリアを含む全文基準） */
   readonly from: number;
   readonly to: number;
-}
+};
 
 /** ノート 1 件分の記法の解析結果 */
-export interface NoteNotation {
+export type NoteNotation = {
   readonly path: string;
   readonly frontmatter: Frontmatter | null;
   /** 本文中のリンク（出現順） */
   readonly links: readonly LinkRef[];
   /** このノートが持つタグ（フロントマテリア → インラインの順、重複なし） */
   readonly tags: readonly string[];
-}
+};
 
-export interface VaultNotationIndex {
+export type VaultNotationIndex = {
   /** ノートパス → 解析結果 */
   readonly notes: ReadonlyMap<string, NoteNotation>;
   /** 参照先パス → 参照元ノートパス一覧（WikiLink / Embed 両方、重複なし） */
@@ -61,14 +61,14 @@ export interface VaultNotationIndex {
   readonly tagIndex: ReadonlyMap<string, readonly string[]>;
   /** 解決不能なリンク一覧（壊れリンク表示用） */
   readonly brokenLinks: readonly LinkRef[];
-}
+};
 
-export interface NotationIndexInput {
+export type NotationIndexInput = {
   /** Vault 内の全ファイルパス（tree.ts と整合。画像等の非 Markdown も含む） */
   readonly filePaths: readonly string[];
   /** ノート本文（パス → 内容） */
   readonly contents: ReadonlyMap<string, string>;
-}
+};
 
 /**
  * Vault 内のノート一式からリンク索引を構築する。
@@ -110,9 +110,9 @@ export function buildNotationIndex(input: NotationIndexInput): VaultNotationInde
         const sources = backlinks.get(resolvedPath) ?? new Set<string>();
         sources.add(path);
         backlinks.set(resolvedPath, sources);
-      } else {
-        brokenLinks.push(ref);
+        continue;
       }
+      brokenLinks.push(ref);
     }
 
     // タグ（フロントマテリア → インラインの順、大文字小文字を区別せず重複除去）

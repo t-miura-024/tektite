@@ -6,20 +6,28 @@
  * ビルド・テストは通り、実行時は明確なエラーを返す。
  */
 
+import { isErrorNamed, makeNamedError } from '@/api/_lib/error-object';
+
 /** ブラウザが訪れる GitHub の認可ページ（OAuth App フロー固定） */
 export const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 
 const DEFAULT_GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const DEFAULT_GITHUB_API_BASE_URL = 'https://api.github.com';
 
-export class AuthConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'AuthConfigError';
-  }
+/** 認証エンドポイントの環境変数が未設定のときのエラー */
+export type AuthConfigError = Error;
+
+/** AuthConfigError を生成するファクトリ */
+export function authConfigError(message: string): AuthConfigError {
+  return makeNamedError('AuthConfigError', message);
 }
 
-export interface AuthConfig {
+/** error が AuthConfigError かどうか */
+export function isAuthConfigError(error: unknown): error is AuthConfigError {
+  return isErrorNamed(error, 'AuthConfigError');
+}
+
+export type AuthConfig = {
   clientId: string;
   clientSecret: string;
   sessionSecret: string;
@@ -28,20 +36,20 @@ export interface AuthConfig {
   tokenUrl: string;
   /** サーバー側 GitHub API ベース URL（E2E でモック差し替え可能） */
   apiBaseUrl: string;
-}
+};
 
 export function resolveAuthConfig(env: Env): AuthConfig {
   if (!env.GITHUB_CLIENT_ID) {
-    throw new AuthConfigError('環境変数 GITHUB_CLIENT_ID が設定されていません');
+    throw authConfigError('環境変数 GITHUB_CLIENT_ID が設定されていません');
   }
   if (!env.GITHUB_CLIENT_SECRET) {
-    throw new AuthConfigError('環境変数 GITHUB_CLIENT_SECRET が設定されていません');
+    throw authConfigError('環境変数 GITHUB_CLIENT_SECRET が設定されていません');
   }
   if (!env.SESSION_SECRET) {
-    throw new AuthConfigError('環境変数 SESSION_SECRET が設定されていません');
+    throw authConfigError('環境変数 SESSION_SECRET が設定されていません');
   }
   if (!env.OAUTH_REDIRECT_URI) {
-    throw new AuthConfigError('環境変数 OAUTH_REDIRECT_URI が設定されていません');
+    throw authConfigError('環境変数 OAUTH_REDIRECT_URI が設定されていません');
   }
   return {
     clientId: env.GITHUB_CLIENT_ID,

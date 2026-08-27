@@ -6,7 +6,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { createEditorView, imageEmbedSnippet, imageFilesFrom } from '@/infra/editor/editor';
+import { createEditorView } from '@/infra/editor/editor';
+import { imageEmbedSnippet, imageFilesFrom } from '@/infra/editor/upload';
 
 // jsdom は matchMedia を持たないため、エディタのテーマ判定用にポリフィルする
 Object.defineProperty(window, 'matchMedia', {
@@ -51,10 +52,10 @@ function editorIn(container: HTMLElement, options: Parameters<typeof createEdito
 
 describe('imageFilesFrom / imageEmbedSnippet（純関数）', () => {
   it('image/* のファイルだけを抽出する', () => {
-    const data = {
+    const transfer = {
       files: [pngFile('a.png'), new File(['text'], 'b.txt', { type: 'text/plain' })],
     } as unknown as DataTransfer;
-    const files = imageFilesFrom(data);
+    const files = imageFilesFrom(transfer);
     expect(files.map((file) => file.name)).toEqual(['a.png']);
   });
 

@@ -115,3 +115,33 @@ _Avoid_: refactoring, redirect
 **PAT モード**:
 GitHub OAuth を介さず、ローカル環境変数に設定した個人アクセストークンで認証する開発専用の動作モード。`TEKTITE_PAT_AUTH=true` と `GITHUB_PERSONAL_TOKEN` の両方が設定された時のみ有効で、有効中はセッション Cookie より優先してトークンが使われる。
 _Avoid_: token auth, personal token login
+
+### 開発規律
+
+**Linter強化**:
+本計画で指す `oxlint + typescript-eslint` による静的検査の厳密化。フォーマッタ（oxfmt）とは区別する。
+_Avoid_: formatter, lint-format混同
+
+**レイヤー**:
+`src/domain` / `src/application` / `src/infra` / `src/api` / `src/ui` / `src/composition.ts`（組成ルート）の6区分。依存方向は単方向に保つ。
+_Avoid_: layerの恣意的追加
+
+**組成ルート**:
+`src/composition.ts` のみが infra を知ることを許される唯一のモジュール（現行規約）。ui は composition 経由で infra 機能を利用する。
+_Avoid_: 直接infra import
+
+**一括修正**:
+既存コードの全違反を一度に修正し、最初から `error` で導入する戦略。単一巨大PRで linter指摘0まで修正を繰り返す。
+_Avoid_: grandfather, warn昇格
+
+**テストファイル**:
+`*.test.ts` / `*.test.tsx` / `*.spec.ts` 等のテストコード。`as` アサーションと `class` 定義について本番コードより緩い例外を許容する。
+_Avoid_: 本番同等の厳密性
+
+**ファイル行数制限**:
+ts 300行 / tsx 400行（テスト除外）。tsxはJSXの冗長性を考慮して余裕を持たせる。`max-lines-per-function: 80` と併用する。
+_Avoid_: 一律制限
+
+**デファクト厳密ルール**:
+`no-console` / `eqeqeq` / `no-var` / `prefer-const` / `no-throw-literal` / `import秩序` 等の業界標準的な厳密ルール群。
+_Avoid_: 恣意的ルール選定

@@ -13,35 +13,44 @@
 
 import { Context, Effect } from 'effect';
 
+import { makeNamedError, isErrorNamed } from '@/application/error-object';
 import type { VaultRef } from '@/domain/vault';
 
 /** Draft ストレージエラーの種類（UI がトーストの出し分けに使える） */
 export type DraftStoreErrorKind = 'unavailable' | 'quota';
 
 /** Draft の読み書きで発生するエラー */
-export class DraftStoreError extends Error {
+export type DraftStoreError = Error & {
   readonly kind: DraftStoreErrorKind;
+};
 
-  constructor(kind: DraftStoreErrorKind, message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'DraftStoreError';
-    this.kind = kind;
-  }
+/** DraftStoreError を生成するファクトリ */
+export function draftStoreError(
+  kind: DraftStoreErrorKind,
+  message: string,
+  options?: { cause?: unknown },
+): DraftStoreError {
+  return Object.assign(makeNamedError('DraftStoreError', message, options), { kind });
+}
+
+/** error が DraftStoreError かどうか */
+export function isDraftStoreError(error: unknown): error is DraftStoreError {
+  return isErrorNamed(error, 'DraftStoreError');
 }
 
 /** 退避された Draft（保存時に復元するための情報） */
-export interface Draft {
+export type Draft = {
   /** Vault ルートからのノートパス（/ 区切り） */
   readonly path: string;
   /** 未保存の本文（UTF-8 のテキスト） */
   readonly content: string;
-}
+};
 
 /**
  * ポート: Draft の退避・復元（Effect Service）。
  * src/infra/storage の DraftStoreLive（localStorage 実装）が提供する。
  */
-export interface DraftStore {
+export type DraftStore = {
   readonly get: (ref: VaultRef, notePath: string) => Effect.Effect<Draft | null, DraftStoreError>;
   readonly set: (
     ref: VaultRef,
@@ -49,7 +58,7 @@ export interface DraftStore {
     content: string,
   ) => Effect.Effect<void, DraftStoreError>;
   readonly remove: (ref: VaultRef, notePath: string) => Effect.Effect<void, DraftStoreError>;
-}
+};
 export const DraftStore = Context.GenericTag<DraftStore>('tektite/DraftStore');
 
 /** 退避済み Draft を取得する（なければ null） */

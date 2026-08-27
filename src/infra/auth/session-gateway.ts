@@ -14,17 +14,30 @@
 
 import { Effect, Layer } from 'effect';
 
-import { SessionFetchError, SessionGateway } from '@/application/session';
-import type { Session } from '@/application/session';
+import { sessionFetchError, SessionGateway, type Session } from '@/application/session';
 
-interface MeResponseBody {
-  authenticated?: boolean;
-  login?: string;
+/** /api/auth/me 応答から認証済みフラグを読む（形式不正は false） */
+function readAuthenticated(body: unknown): boolean {
+  return typeof body === 'object' && body !== null && 'authenticated' in body
+    ? body.authenticated === true
+    : false;
 }
 
-function toSession(body: MeResponseBody): Session {
-  if (body.authenticated === true && typeof body.login === 'string' && body.login.length > 0) {
-    return { status: 'authenticated', user: { login: body.login } };
+/** /api/auth/me 応答からログイン名を読む（形式不正は null） */
+function readLogin(body: unknown): string | null {
+  if (typeof body === 'object' && body !== null && 'login' in body) {
+    const login = body.login;
+    return typeof login === 'string' && login.length > 0 ? login : null;
+  }
+  return null;
+}
+
+function toSession(body: unknown): Session {
+  if (readAuthenticated(body)) {
+    const login = readLogin(body);
+    if (login !== null) {
+      return { status: 'authenticated', user: { login } };
+    }
   }
   return { status: 'anonymous' };
 }
@@ -36,20 +49,20 @@ export const SessionGatewayLive = Layer.succeed(SessionGateway, {
       const response = yield* Effect.tryPromise({
         try: () => fetch('/api/auth/me'),
         catch: (error) =>
-          new SessionFetchError('セッション状態を確認できませんでした。', { cause: error }),
+          sessionFetchError('セッション状態を確認できませんでした。', { cause: error }),
       });
       if (response.status === 401) {
         return { status: 'anonymous' } as const;
       }
       if (!response.ok) {
         return yield* Effect.fail(
-          new SessionFetchError(`セッション確認に失敗しました（HTTP ${response.status}）。`),
+          sessionFetchError(`セッション確認に失敗しました（HTTP ${response.status}）。`),
         );
       }
       const body = yield* Effect.tryPromise({
-        try: () => response.json() as Promise<MeResponseBody>,
+        try: (): Promise<unknown> => response.json(),
         catch: (error) =>
-          new SessionFetchError('セッション状態を確認できませんでした。', { cause: error }),
+          sessionFetchError('セッション状態を確認できませんでした。', { cause: error }),
       });
       return toSession(body);
     }),
@@ -58,11 +71,11 @@ export const SessionGatewayLive = Layer.succeed(SessionGateway, {
     Effect.gen(function* () {
       const response = yield* Effect.tryPromise({
         try: () => fetch('/api/auth/logout', { method: 'POST' }),
-        catch: (error) => new SessionFetchError('ログアウトできませんでした。', { cause: error }),
+        catch: (error) => sessionFetchError('ログアウトできませんでした。', { cause: error }),
       });
       if (!response.ok) {
         return yield* Effect.fail(
-          new SessionFetchError(`ログアウトに失敗しました（HTTP ${response.status}）。`),
+          sessionFetchError(`ログアウトに失敗しました（HTTP ${response.status}）。`),
         );
       }
     }),

@@ -3,6 +3,7 @@
  *
  * UI の操作（FileOperation）を、リンク張り替え（src/domain/notation/rewrite）と
  * 一括コミット（NoteGateway.commitChanges → functions/api/files）に変換して実行する。
+ * 変更列の組み立てと検証は src/application/file-changes が担う。
  *
  * 方針:
  * - リネーム/移動は必ず「移動 + リンク張り替え + 影響ノート更新」を 1 コミットに
@@ -21,36 +22,23 @@
 
 import { Effect } from 'effect';
 
-import { FileCommitError, NoteGateway } from '@/application/note';
-import type { CommitChangesInput, FileChange } from '@/application/note';
-import { NoteIndexRegistry } from '@/application/note-index';
-import type { NoteIndex } from '@/application/note-index';
-import { planLinkRewrite } from '@/domain/notation/rewrite';
-import type { MovePair, RewriteIssue } from '@/domain/notation/rewrite';
+import {
+  buildChanges,
+  type FileOperation,
+  type FileOperationResult,
+} from '@/application/file-changes';
+import { isValidPath } from '@/application/file-changes-entries';
+import {
+  fileCommitError,
+  NoteGateway,
+  type CommitChangesInput,
+  type FileChange,
+  type FileCommitError,
+} from '@/application/note';
+import { NoteIndexRegistry, type NoteIndex } from '@/application/note-index';
 import type { VaultRef } from '@/domain/vault';
 
-/** ファイル操作 1 件（path は Vault ルートからの / 区切りフルパス） */
-export type FileOperation =
-  | { readonly kind: 'create-note'; readonly path: string; readonly content?: string }
-  | { readonly kind: 'create-directory'; readonly path: string }
-  | { readonly kind: 'delete-note'; readonly path: string }
-  | { readonly kind: 'delete-directory'; readonly path: string }
-  | { readonly kind: 'rename-note'; readonly from: string; readonly to: string }
-  | { readonly kind: 'rename-directory'; readonly from: string; readonly to: string }
-  | { readonly kind: 'duplicate-note'; readonly from: string; readonly to: string }
-  | { readonly kind: 'duplicate-directory'; readonly from: string; readonly to: string };
-
-/** 操作の結果（UI がツリー再読込・ノート遷移・警告表示に使う） */
-export interface FileOperationResult {
-  /** 削除されたパス（リネーム/移動の元パスを含む） */
-  readonly removedPaths: readonly string[];
-  /** リネーム/移動の対応（from → to。ディレクトリ操作は配下ファイル分に展開済み） */
-  readonly movedPaths: readonly MovePair[];
-  /** 新規作成されたパス（create-directory は `.gitkeep` ではなくディレクトリパス） */
-  readonly createdPaths: readonly string[];
-  /** 張り替えられなかった曖昧参照（リネーム/移動時のみ） */
-  readonly issues: readonly RewriteIssue[];
-}
+export type { FileOperation, FileOperationResult };
 
 /** 名前検証: セグメントとして不正な文字（WikiLink 記法と衝突するもの） */
 const INVALID_NAME_CHARS = /[/\\#|[\]<>:?*"]/;
@@ -79,242 +67,30 @@ export function validateEntryName(name: string, isNote: boolean): string | null 
   return null;
 }
 
-/** パスのセグメント検証（空セグメント・. / .. ・前後スラッシュを拒否） */
-function isValidPath(path: string): boolean {
-  if (path === '' || path.startsWith('/') || path.endsWith('/')) {
-    return false;
-  }
-  return path
-    .split('/')
-    .every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
-}
-
-/** 検証エラーの失敗値（buildChanges の ok: false 形） */
-const validationFailure = (
-  message: string,
-): { readonly ok: false; readonly error: FileCommitError } => ({
-  ok: false,
-  error: new FileCommitError('server', message),
-});
-
-/** ディレクトリ配下か（path 自身を含む） */
-function isUnderDirectory(path: string, directory: string): boolean {
-  return path === directory || path.startsWith(`${directory}/`);
-}
-
 /** 操作のコミットメッセージ（既存の自動生成テンプレートと同系） */
 function commitMessage(operation: FileOperation): string {
-  switch (operation.kind) {
-    case 'create-note':
-      return `Create ${operation.path}`;
-    case 'create-directory':
-      return `Create directory ${operation.path}/`;
-    case 'delete-note':
-      return `Delete ${operation.path}`;
-    case 'delete-directory':
-      return `Delete directory ${operation.path}/`;
-    case 'rename-note':
-      return `Rename ${operation.from} to ${operation.to}`;
-    case 'rename-directory':
-      return `Rename directory ${operation.from} to ${operation.to}`;
-    case 'duplicate-note':
-      return `Duplicate ${operation.from} to ${operation.to}`;
-    case 'duplicate-directory':
-      return `Duplicate directory ${operation.from} to ${operation.to}`;
-  }
-}
-
-/** ファイルパス集合（大文字小文字を区別しない重複チェック用の小文字セット） */
-function lowerPathSet(paths: readonly string[]): Set<string> {
-  return new Set(paths.map((path) => path.toLowerCase()));
-}
-
-/**
- * 操作の検証を行い、コミットへ渡す変更列（FileChange）を組み立てる。
- * filePaths は操作前の全ファイルパス（ツリー由来）。contents は全ノート本文（旧パス基準）。
- * 検証エラーは ok: false で返す（Effect.gen 内で typed failure として扱うため）。
- */
-function buildChanges(
-  operation: FileOperation,
-  filePaths: readonly string[],
-  contents: ReadonlyMap<string, string>,
-):
-  | { readonly ok: true; readonly changes: FileChange[]; readonly result: FileOperationResult }
-  | { readonly ok: false; readonly error: FileCommitError } {
-  const existing = lowerPathSet(filePaths);
-
   if (operation.kind === 'create-note') {
-    if (!isValidPath(operation.path) || !operation.path.endsWith('.md')) {
-      return validationFailure('ノートのパスが不正です。');
-    }
-    if (existing.has(operation.path.toLowerCase())) {
-      return validationFailure(`「${operation.path}」は既に存在します。`);
-    }
-    return {
-      ok: true,
-      // Obsidian 式の新規作成（Q11/Q15）: タイトル確定時に本文を含めて 1 コミットする
-      changes: [{ op: 'create', path: operation.path, content: operation.content ?? '' }],
-      result: { removedPaths: [], movedPaths: [], createdPaths: [operation.path], issues: [] },
-    };
+    return `Create ${operation.path}`;
   }
-
   if (operation.kind === 'create-directory') {
-    if (!isValidPath(operation.path)) {
-      return validationFailure('ディレクトリのパスが不正です。');
-    }
-    if (filePaths.some((path) => isUnderDirectory(path, operation.path))) {
-      return validationFailure(`「${operation.path}」は既に存在します。`);
-    }
-    // GitHub は空ディレクトリを保持できないため .gitkeep を置く
-    const keepPath = `${operation.path}/.gitkeep`;
-    return {
-      ok: true,
-      changes: [{ op: 'create', path: keepPath, content: '' }],
-      result: { removedPaths: [], movedPaths: [], createdPaths: [operation.path], issues: [] },
-    };
+    return `Create directory ${operation.path}/`;
   }
-
   if (operation.kind === 'delete-note') {
-    if (!existing.has(operation.path.toLowerCase())) {
-      return validationFailure(`「${operation.path}」は存在しません。`);
-    }
-    return {
-      ok: true,
-      changes: [{ op: 'delete', path: operation.path }],
-      result: { removedPaths: [operation.path], movedPaths: [], createdPaths: [], issues: [] },
-    };
+    return `Delete ${operation.path}`;
   }
-
   if (operation.kind === 'delete-directory') {
-    const targets = filePaths.filter((path) => isUnderDirectory(path, operation.path));
-    if (targets.length === 0) {
-      return validationFailure(`「${operation.path}」は存在しません。`);
-    }
-    return {
-      ok: true,
-      changes: targets.map((path) => ({ op: 'delete' as const, path })),
-      result: {
-        removedPaths: targets,
-        movedPaths: [],
-        createdPaths: [],
-        issues: [],
-      },
-    };
+    return `Delete directory ${operation.path}/`;
   }
-
-  // 複製（Obsidian 式命名は UI 側が決め、to を渡す。内容はそのままコピーし
-  // WikiLink は張り替えない。copy はサーバー側で blob sha を再利用する）
+  if (operation.kind === 'rename-note') {
+    return `Rename ${operation.from} to ${operation.to}`;
+  }
+  if (operation.kind === 'rename-directory') {
+    return `Rename directory ${operation.from} to ${operation.to}`;
+  }
   if (operation.kind === 'duplicate-note') {
-    if (!isValidPath(operation.to) || !operation.to.endsWith('.md')) {
-      return validationFailure('複製先のノートパスが不正です。');
-    }
-    if (!existing.has(operation.from.toLowerCase())) {
-      return validationFailure(`「${operation.from}」は存在しません。`);
-    }
-    if (existing.has(operation.to.toLowerCase())) {
-      return validationFailure(`「${operation.to}」は既に存在します。`);
-    }
-    return {
-      ok: true,
-      changes: [{ op: 'copy', path: operation.from, to: operation.to }],
-      result: { removedPaths: [], movedPaths: [], createdPaths: [operation.to], issues: [] },
-    };
+    return `Duplicate ${operation.from} to ${operation.to}`;
   }
-
-  if (operation.kind === 'duplicate-directory') {
-    if (!isValidPath(operation.to)) {
-      return validationFailure('複製先のディレクトリパスが不正です。');
-    }
-    const children = filePaths.filter((path) => isUnderDirectory(path, operation.from));
-    if (children.length === 0) {
-      return validationFailure(`「${operation.from}」は存在しません。`);
-    }
-    const copies = children.map((path) => ({
-      from: path,
-      to: `${operation.to}${path.slice(operation.from.length)}`,
-    }));
-    const colliding = copies.find((copy) => existing.has(copy.to.toLowerCase()));
-    if (colliding !== undefined) {
-      return validationFailure(`複製先「${colliding.to}」は既に存在します。`);
-    }
-    return {
-      ok: true,
-      changes: copies.map((copy) => ({ op: 'copy', path: copy.from, to: copy.to })),
-      result: { removedPaths: [], movedPaths: [], createdPaths: [operation.to], issues: [] },
-    };
-  }
-
-  // リネーム/移動（ノート 1 件 or ディレクトリ配下すべて）
-  const expandMove = (
-    from: string,
-    to: string,
-  ): MovePair[] | { readonly ok: false; readonly error: FileCommitError } => {
-    if (from === to) {
-      return validationFailure('移動元と移動先が同じです。');
-    }
-    if (!isValidPath(to)) {
-      return validationFailure('移動先のパスが不正です。');
-    }
-    if (existing.has(to.toLowerCase())) {
-      return validationFailure(`「${to}」は既に存在します。`);
-    }
-    if (operation.kind === 'rename-note') {
-      if (!existing.has(from.toLowerCase())) {
-        return validationFailure(`「${from}」は存在しません。`);
-      }
-      return [{ from, to }];
-    }
-    // ディレクトリ配下の全ファイル（添付含む）を移動対象に展開する
-    const children = filePaths.filter((path) => isUnderDirectory(path, from));
-    if (children.length === 0) {
-      return validationFailure(`「${from}」は存在しません。`);
-    }
-    const moves = children.map((path) => ({ from: path, to: `${to}${path.slice(from.length)}` }));
-    // 展開後の個別移動先が既存ファイルと衝突する場合は失敗させる。
-    // 先の existing.has(to) はディレクトリ自身の検証にしかならないため、
-    // 例: 既存の daily/tektite.md がある Vault で projects/ を daily/ へ移動すると
-    // 一括コミットの delta 上書きで既存ファイルの内容が失われる（実削除同様に
-    // git 履歴を除いて取り返しがつかない）。移動元自身が移動先になるケースは
-    // from === to の検証で除外済みで、展開後の to が from 配下に一致することもない
-    const colliding = moves.find((move) => existing.has(move.to.toLowerCase()));
-    if (colliding !== undefined) {
-      return validationFailure(`移動先「${colliding.to}」は既に存在します。`);
-    }
-    return moves;
-  };
-
-  const expanded = expandMove(operation.from, operation.to);
-  if (!Array.isArray(expanded)) {
-    return expanded;
-  }
-  const moves = expanded;
-  const plan = planLinkRewrite({ moves, contents, filePaths });
-
-  const changes: FileChange[] = [];
-  for (const move of moves) {
-    changes.push({ op: 'move', path: move.from, to: move.to });
-    const rewrittenContent = plan.rewritten.get(move.from);
-    if (rewrittenContent !== undefined) {
-      // 移動元ノート自身のリンクが張り替わった場合は移動後に新本文で上書きする
-      changes.push({ op: 'update', path: move.to, content: rewrittenContent });
-    }
-  }
-  for (const [path, content] of plan.rewritten) {
-    if (!moves.some((move) => move.from === path)) {
-      changes.push({ op: 'update', path, content });
-    }
-  }
-
-  return {
-    ok: true,
-    changes,
-    result: {
-      removedPaths: moves.map((move) => move.from),
-      movedPaths: moves,
-      createdPaths: [],
-      issues: plan.issues,
-    },
-  };
+  return `Duplicate directory ${operation.from} to ${operation.to}`;
 }
 
 /**
@@ -350,20 +126,20 @@ export const applyFileOperation = (
 // ---- M2: 画像アップロード ----
 
 /** 画像アップロードの入力（fileName の拡張子で画像種別を検証する） */
-export interface UploadImageInput {
+export type UploadImageInput = {
   /** 元のファイル名（例: screenshot.png。拡張子が無い場合は不正） */
   readonly fileName: string;
   /** 画像バイナリの標準 base64（btoa 互換。コミット API の content と同じ規約） */
   readonly base64: string;
   /** 保存先ディレクトリ（省略時は attachments。Obsidian の添付フォルダ規約） */
   readonly directory?: string;
-}
+};
 
 /** 画像アップロードの結果 */
-export interface UploadImageResult {
+export type UploadImageResult = {
   /** コミットされた Vault 内パス（例: attachments/20260809-123456-3f2a.png） */
   readonly path: string;
-}
+};
 
 /** 受け付ける画像拡張子（raw 配信と Embed 表示が対象のラスター/ベクター） */
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'svg']);
@@ -416,7 +192,7 @@ export const uploadImage = (
     const directory = input.directory === undefined ? 'attachments' : input.directory;
     if (directory !== '' && !isValidPath(directory)) {
       return yield* Effect.fail(
-        new FileCommitError('server', 'アップロード先のフォルダー名が不正です。'),
+        fileCommitError('server', 'アップロード先のフォルダー名が不正です。'),
       );
     }
     const path = buildImagePath(
@@ -427,10 +203,10 @@ export const uploadImage = (
       Math.random().toString(36).slice(2, 6).padEnd(4, '0'),
     );
     if (path === null) {
-      return yield* Effect.fail(new FileCommitError('server', '画像ファイル名が不正です。'));
+      return yield* Effect.fail(fileCommitError('server', '画像ファイル名が不正です。'));
     }
     if (!isValidBase64(input.base64)) {
-      return yield* Effect.fail(new FileCommitError('server', '画像データが不正です。'));
+      return yield* Effect.fail(fileCommitError('server', '画像データが不正です。'));
     }
 
     const gateway = yield* NoteGateway;
