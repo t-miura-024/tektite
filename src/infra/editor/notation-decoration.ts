@@ -20,22 +20,8 @@
 import { RangeSetBuilder, StateField, type Extension, type Text } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 
-import { parseNotation, type NotationSpan } from '@/domain/notation/parse';
+import { parseNotation } from '@/domain/notation/parse';
 import { resolveNotePath } from '@/domain/notation/resolve';
-
-/** スパン種別ごとの装飾クラス（テーブル駆動） */
-function toNotationDecoration(span: NotationSpan, filePaths: readonly string[]): Decoration | null {
-  if (span.kind === 'wikilink') {
-    const resolved = resolveNotePath(span.target, filePaths);
-    const broken = resolved === null || !resolved.endsWith('.md');
-    return Decoration.mark({ class: broken ? 'tk-wikilink tk-wikilink-broken' : 'tk-wikilink' });
-  }
-  if (span.kind === 'embed') {
-    const broken = resolveNotePath(span.target, filePaths) === null;
-    return Decoration.mark({ class: broken ? 'tk-embed tk-embed-broken' : 'tk-embed' });
-  }
-  return Decoration.mark({ class: 'tk-tag' });
-}
 
 /**
  * ドキュメント全体の記法装飾セットを組み立てる（純粋関数。テスト用に分離）。
@@ -48,7 +34,20 @@ export function computeNotationDecorationSet(
 ): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const span of parseNotation(doc.toString()).spans) {
-    const decoration = toNotationDecoration(span, filePaths);
+    const decoration = ((): Decoration | null => {
+      if (span.kind === 'wikilink') {
+        const resolved = resolveNotePath(span.target, filePaths);
+        const broken = resolved === null || !resolved.endsWith('.md');
+        return Decoration.mark({
+          class: broken ? 'tk-wikilink tk-wikilink-broken' : 'tk-wikilink',
+        });
+      }
+      if (span.kind === 'embed') {
+        const broken = resolveNotePath(span.target, filePaths) === null;
+        return Decoration.mark({ class: broken ? 'tk-embed tk-embed-broken' : 'tk-embed' });
+      }
+      return Decoration.mark({ class: 'tk-tag' });
+    })();
     if (decoration !== null) {
       builder.add(span.from, span.to, decoration);
     }

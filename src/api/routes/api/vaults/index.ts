@@ -38,16 +38,6 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** GitHub のリポジトリ応答 1 件かどうか（toVault が必要とするフィールドの最小検査） */
-function isGithubRepo(value: unknown): value is GithubRepo {
-  return (
-    isRecordObject(value) &&
-    typeof value.name === 'string' &&
-    isRecordObject(value.owner) &&
-    typeof value.owner.login === 'string'
-  );
-}
-
 type GithubRepo = {
   name?: unknown;
   full_name?: unknown;
@@ -107,38 +97,26 @@ async function fetchRepoPages(
   if (!Array.isArray(body)) {
     return Response.json({ error: 'github_error' }, { status: 502 });
   }
-  const repos = body.filter(isGithubRepo);
+  const repos = body.filter((value: unknown): value is GithubRepo => {
+    if (!isRecordObject(value)) {
+      return false;
+    }
+    if (typeof value.name !== 'string') {
+      return false;
+    }
+    if (!isRecordObject(value.owner)) {
+      return false;
+    }
+    if (typeof value.owner.login !== 'string') {
+      return false;
+    }
+    return true;
+  });
   accumulated.push(...repos);
   if (repos.length < PER_PAGE) {
     return accumulated;
   }
   return fetchRepoPages(config, token, page + 1, accumulated);
-}
-
-function toVault(repo: GithubRepo): VaultResponseBody | null {
-  if (typeof repo.name !== 'string' || repo.name.length === 0) {
-    return null;
-  }
-  if (!repo.owner || typeof repo.owner.login !== 'string' || repo.owner.login.length === 0) {
-    return null;
-  }
-  const owner = repo.owner.login;
-  const name = repo.name;
-  const updatedAt =
-    typeof repo.pushed_at === 'string'
-      ? repo.pushed_at
-      : typeof repo.updated_at === 'string'
-        ? repo.updated_at
-        : '';
-  return {
-    owner,
-    name,
-    fullName: typeof repo.full_name === 'string' ? repo.full_name : `${owner}/${name}`,
-    description: typeof repo.description === 'string' ? repo.description : null,
-    isPrivate: repo.private === true,
-    defaultBranch: typeof repo.default_branch === 'string' ? repo.default_branch : 'main',
-    updatedAt,
-  };
 }
 
 export async function handleVaultsGet(context: RouteContext): Promise<Response> {
@@ -178,10 +156,30 @@ export async function handleVaultsGet(context: RouteContext): Promise<Response> 
     ) {
       continue;
     }
-    const vault = toVault(repo);
-    if (vault) {
-      vaults.push(vault);
+    if (typeof repo.name !== 'string' || repo.name.length === 0) {
+      continue;
     }
+    if (!repo.owner || typeof repo.owner.login !== 'string' || repo.owner.login.length === 0) {
+      continue;
+    }
+    const _owner = repo.owner.login;
+    const _name = repo.name;
+    const _updatedAt =
+      typeof repo.pushed_at === 'string'
+        ? repo.pushed_at
+        : typeof repo.updated_at === 'string'
+          ? repo.updated_at
+          : '';
+    const vault: VaultResponseBody = {
+      owner: _owner,
+      name: _name,
+      fullName: typeof repo.full_name === 'string' ? repo.full_name : `${_owner}/${_name}`,
+      description: typeof repo.description === 'string' ? repo.description : null,
+      isPrivate: repo.private === true,
+      defaultBranch: typeof repo.default_branch === 'string' ? repo.default_branch : 'main',
+      updatedAt: _updatedAt,
+    };
+    vaults.push(vault);
   }
 
   return Response.json({ vaults }, { headers: { 'Cache-Control': 'no-store' } });

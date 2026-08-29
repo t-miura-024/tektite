@@ -44,10 +44,6 @@ export type VaultTree = {
   readonly root: TreeDirectory;
 };
 
-function isHiddenSegment(segment: string): boolean {
-  return segment.startsWith('.');
-}
-
 /**
  * 隠れディレクトリ配下（または隠れディレクトリ自体）かどうか。
  * ファイル自身の名前がドット始まりでも、その「ファイル」は除外しない。
@@ -55,7 +51,7 @@ function isHiddenSegment(segment: string): boolean {
 export function isExcludedPath(path: string, type: TreeEntryType): boolean {
   const segments = path.split('/');
   const directorySegments = type === 'directory' ? segments : segments.slice(0, -1);
-  return directorySegments.some(isHiddenSegment);
+  return directorySegments.some((segment) => segment.startsWith('.'));
 }
 
 /** ファイルパスの祖先ディレクトリパスをルート側から順に返す（ツリー展開用） */

@@ -21,29 +21,25 @@ export type NotePaneHeaderProps = {
   onSave: () => void;
 };
 
-/** 保存状態の表示ラベルとテスト用キー（競合中は「競合」を最優先） */
-function statusParts(props: NotePaneHeaderProps): { label: string; key: string } {
-  const { isPending, saveStatus } = props;
-  if (isPending) {
-    return saveStatus === 'saving'
-      ? { label: '作成中…', key: 'saving' }
-      : { label: '未保存', key: 'dirty' };
-  }
-  if (props.conflictActive || props.syncConflictShown) {
-    return { label: '競合', key: 'conflict' };
-  }
-  if (saveStatus === 'saving') {
-    return { label: '保存中…', key: 'saving' };
-  }
-  if (saveStatus === 'dirty') {
-    return { label: '未保存', key: 'dirty' };
-  }
-  return { label: '保存済み', key: 'clean' };
-}
-
 export function NotePaneHeader(props: NotePaneHeaderProps): JSX.Element {
   const { notePath, mode, setMode, isPending, saveStatus, conflictActive, loadReady } = props;
-  const status = statusParts(props);
+  const status: { label: string; key: string } = ((): { label: string; key: string } => {
+    if (isPending) {
+      return saveStatus === 'saving'
+        ? { label: '作成中…', key: 'saving' }
+        : { label: '未保存', key: 'dirty' };
+    }
+    if (props.conflictActive || props.syncConflictShown) {
+      return { label: '競合', key: 'conflict' };
+    }
+    if (saveStatus === 'saving') {
+      return { label: '保存中…', key: 'saving' };
+    }
+    if (saveStatus === 'dirty') {
+      return { label: '未保存', key: 'dirty' };
+    }
+    return { label: '保存済み', key: 'clean' };
+  })();
   const disabledByConflict = !loadReady || conflictActive;
   return (
     <header className="note-pane-header">

@@ -74,21 +74,6 @@ export type EditorHandle = {
   readonly onChange: (callback: (content: string) => void) => void;
 };
 
-/** システム / アプリ設定のダークモード判定（CM6 のテーマ配色選択用） */
-function isDarkMode(): boolean {
-  if (typeof document === 'undefined') {
-    return false;
-  }
-  const theme = document.documentElement.getAttribute('data-theme');
-  if (theme === 'dark') {
-    return true;
-  }
-  if (theme === 'light') {
-    return false;
-  }
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
 /** アプリの CSS 変数に追従するエディタテーマ */
 const editorTheme = (dark: boolean): Extension =>
   EditorView.theme(
@@ -155,7 +140,21 @@ export function buildEditorState(
         : []),
       lineNumbers(),
       EditorView.lineWrapping,
-      editorTheme(isDarkMode()),
+      editorTheme(
+        ((): boolean => {
+          if (typeof document === 'undefined') {
+            return false;
+          }
+          const theme = document.documentElement.getAttribute('data-theme');
+          if (theme === 'dark') {
+            return true;
+          }
+          if (theme === 'light') {
+            return false;
+          }
+          return window.matchMedia('(prefers-color-scheme: dark)').matches;
+        })(),
+      ),
       ...extraExtensions,
     ],
   });

@@ -35,22 +35,6 @@ export function tokenKeyForLogin(login: string): string {
   return `${KV_KEY_PREFIX}${login}`;
 }
 
-function isStoredTokenPair(value: unknown): value is StoredTokenPair {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  return (
-    'accessToken' in value &&
-    typeof value.accessToken === 'string' &&
-    (!('refreshToken' in value) ||
-      value.refreshToken === undefined ||
-      typeof value.refreshToken === 'string') &&
-    (!('expiresAt' in value) ||
-      value.expiresAt === undefined ||
-      typeof value.expiresAt === 'number')
-  );
-}
-
 /** トークンペアを AES-GCM 暗号化して KV に保存する（login 単位。上書きは最新トークン優先） */
 export async function saveTokenPair(
   kv: KVNamespace,
@@ -78,7 +62,31 @@ export async function readTokenPair(
   }
   try {
     const parsed: unknown = JSON.parse(decrypted.value);
-    return isStoredTokenPair(parsed) ? parsed : null;
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'accessToken' in parsed &&
+      typeof parsed.accessToken === 'string' &&
+      (!('refreshToken' in parsed) ||
+        parsed.refreshToken === undefined ||
+        typeof parsed.refreshToken === 'string') &&
+      (!('expiresAt' in parsed) ||
+        parsed.expiresAt === undefined ||
+        typeof parsed.expiresAt === 'number')
+    ) {
+      return {
+        accessToken: parsed.accessToken,
+        refreshToken:
+          'refreshToken' in parsed && typeof parsed.refreshToken === 'string'
+            ? parsed.refreshToken
+            : undefined,
+        expiresAt:
+          'expiresAt' in parsed && typeof parsed.expiresAt === 'number'
+            ? parsed.expiresAt
+            : undefined,
+      };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -155,12 +163,7 @@ export async function refreshOAuthToken(
     // 無効・失効済みの refresh token（GitHub は 200 + { error } または 4xx で返す）
     throw tokenRefreshError('invalid_grant');
   }
-  return buildStoredTokenPair(body, accessToken);
-}
-
-/** OAuth 応答から KV 保存用のトークンペアを組み立てる */
-function buildStoredTokenPair(body: unknown, accessToken: string): StoredTokenPair {
-  const refreshToken =
+  const refreshTokenValue =
     typeof body === 'object' &&
     body !== null &&
     'refresh_token' in body &&
@@ -176,7 +179,7 @@ function buildStoredTokenPair(body: unknown, accessToken: string): StoredTokenPa
       : undefined;
   return {
     accessToken,
-    refreshToken,
+    refreshToken: refreshTokenValue,
     expiresAt: expiresIn === undefined ? undefined : Date.now() + expiresIn * 1000,
   };
 }
@@ -260,17 +263,7 @@ export async function persistOAuthTokenPair(
   if (login === null || login.length === 0) {
     return false;
   }
-  return persistTokenPair(kv, config.sessionSecret, login, tokenBody);
-}
-
-/** 検証済みトークンペアを KV へ暗号化保存する */
-async function persistTokenPair(
-  kv: KVNamespace,
-  sessionSecret: string,
-  login: string,
-  tokenBody: OAuthTokenResponse,
-): Promise<boolean> {
-  await saveTokenPair(kv, sessionSecret, login, {
+  await saveTokenPair(kv, config.sessionSecret, login, {
     accessToken: tokenBody.access_token ?? '',
     refreshToken: tokenBody.refresh_token,
     expiresAt:

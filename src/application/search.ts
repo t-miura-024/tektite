@@ -56,21 +56,6 @@ export type NoteSearcher = {
 /** 一度に表示する結果の上限（個人 Vault では十分） */
 const MAX_RESULTS = 50;
 
-/**
- * 英数字の連続を 1 トークン、日本語（ひらがな・カタカナ・漢字）を 1 文字ずつ
- * トークン化する。大文字小文字は区別しない（小文字に正規化）。
- * 長音「ー」と中黒「・」は Unicode Script が Common のため明示的に含める。
- */
-function tokenize(text: string): string[] {
-  const tokens: string[] = [];
-  for (const match of text.matchAll(
-    /[\w-]+|[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\u30fc\u30fb]/gu,
-  )) {
-    tokens.push(match[0].toLowerCase());
-  }
-  return tokens;
-}
-
 /** 一致種別のソート優先度（本文 > ファイル名 > タグ） */
 const KIND_ORDER: Record<SearchHitKind, number> = {
   content: 0,
@@ -81,29 +66,6 @@ const KIND_ORDER: Record<SearchHitKind, number> = {
 /** クエリ語（トークン）がすべて含まれるか */
 function containsAll(haystack: string, queryTerms: readonly string[]): boolean {
   return queryTerms.every((term) => haystack.includes(term));
-}
-
-/**
- * 一致種別: 本文に全クエリ語を含むなら content、本文にないがパスに含むなら
- * name、どちらにもないがタグに含むなら tag。複数種別に一致する場合は
- * 優先度の高い種別（content）と判定する。
- */
-function classifyHit(note: SearchableNote, queryTerms: readonly string[]): SearchHitKind {
-  if (containsAll(note.content.toLowerCase(), queryTerms)) {
-    return 'content';
-  }
-  if (containsAll(note.path.toLowerCase(), queryTerms)) {
-    return 'name';
-  }
-  if (note.tags.some((tag) => containsAll(tag.toLowerCase(), queryTerms))) {
-    return 'tag';
-  }
-  return 'content';
-}
-
-/** クエリに一致するタグ（原表記）を返す */
-function matchedTagsOf(tags: readonly string[], queryTerms: readonly string[]): readonly string[] {
-  return tags.filter((tag) => containsAll(tag.toLowerCase(), queryTerms));
 }
 
 /**
@@ -199,7 +161,15 @@ export function createNoteSearcher(notes: readonly SearchableNote[]): NoteSearch
   const miniSearch = new MiniSearch({
     idField: 'path',
     fields: ['content', 'name', 'tags'],
-    tokenize,
+    tokenize: (text: string): string[] => {
+      const tokens: string[] = [];
+      for (const match of text.matchAll(
+        /[\w-]+|[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\u30fc\u30fb]/gu,
+      )) {
+        tokens.push(match[0].toLowerCase());
+      }
+      return tokens;
+    },
     searchOptions: {
       prefix: true,
       // 全クエリ語の一致を要求する（日本語 1 文字トークンの部分マッチのノイズを抑える）
@@ -230,13 +200,27 @@ export function createNoteSearcher(notes: readonly SearchableNote[]): NoteSearch
         if (note === undefined) {
           continue;
         }
-        const kind = classifyHit(note, result.queryTerms);
+        const kind: SearchHitKind = ((): SearchHitKind => {
+          if (containsAll(note.content.toLowerCase(), result.queryTerms)) {
+            return 'content';
+          }
+          if (containsAll(note.path.toLowerCase(), result.queryTerms)) {
+            return 'name';
+          }
+          if (note.tags.some((tag) => containsAll(tag.toLowerCase(), result.queryTerms))) {
+            return 'tag';
+          }
+          return 'content';
+        })();
         hits.push({
           path: note.path,
           kind,
           score: result.score,
           snippet: kind === 'content' ? buildSnippet(note.content, result.queryTerms) : null,
-          matchedTags: kind === 'tag' ? matchedTagsOf(note.tags, result.queryTerms) : [],
+          matchedTags:
+            kind === 'tag'
+              ? note.tags.filter((tag) => containsAll(tag.toLowerCase(), result.queryTerms))
+              : [],
         });
       }
       hits.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.score - a.score);

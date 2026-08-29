@@ -51,73 +51,6 @@ function paramToString(value: string | string[] | undefined): string {
   return value ?? '';
 }
 
-async function parseExplicitSyncFlag(request: Request): Promise<boolean> {
-  let rawBody = '';
-  try {
-    rawBody = await request.text();
-  } catch {
-    return false;
-  }
-  if (rawBody.length === 0) {
-    return false;
-  }
-  let action: unknown = null;
-  try {
-    const parsedBody: unknown = JSON.parse(rawBody);
-    if (typeof parsedBody === 'object' && parsedBody !== null && 'action' in parsedBody) {
-      action = parsedBody.action;
-    }
-  } catch {
-    return false;
-  }
-  return action === 'sync';
-}
-
-async function handleExistingVault(
-  request: Request,
-  bucket: R2Bucket,
-  owner: string,
-  repoName: string,
-  config: { apiBaseUrl: string },
-  token: string,
-  existingMeta: { defaultBranch: string },
-): Promise<Response | null> {
-  const isExplicitSync = await parseExplicitSyncFlag(request);
-  if (!isExplicitSync) {
-    return Response.json(
-      {
-        owner,
-        name: repoName,
-        status: 'already_synced',
-        defaultBranch: existingMeta.defaultBranch,
-        notes: 0,
-      },
-      { headers: { 'Cache-Control': 'no-store' } },
-    );
-  }
-  const outcome = await syncVault(config.apiBaseUrl, token, bucket, owner, repoName, 'explicit');
-  if (!outcome.ok) {
-    if (outcome.reason === 'sync_conflict') {
-      return Response.json({ error: 'sync_conflict' }, { status: 409 });
-    }
-    return outcome.response;
-  }
-  return Response.json(
-    {
-      owner,
-      name: repoName,
-      status: outcome.result.status,
-      defaultBranch: existingMeta.defaultBranch,
-      syncedAt: outcome.result.syncedAt,
-      pulled: outcome.result.pulled,
-      pushed: outcome.result.pushed,
-      conflicts: outcome.result.conflicts,
-      remaining: outcome.result.remaining,
-    },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
-}
-
 export async function handleVaultSyncPost(context: RouteContext): Promise<Response> {
   const { env, request, params } = context;
   const owner = paramToString(params.owner);
@@ -150,18 +83,83 @@ export async function handleVaultSyncPost(context: RouteContext): Promise<Respon
   }
   const existingMeta = await readVaultMeta(bucket, owner, repoName);
   if (existingMeta !== null) {
-    const response = await handleExistingVault(
-      request,
+    let _isExplicitSync: boolean | undefined = undefined;
+    let rawBody = '';
+    let _failed = false;
+    try {
+      rawBody = await request.text();
+    } catch {
+      _failed = true;
+    }
+    if (_failed) {
+      _isExplicitSync = false;
+    }
+    if (_isExplicitSync === undefined && rawBody.length === 0) {
+      _isExplicitSync = false;
+    }
+    if (_isExplicitSync === undefined) {
+      let action: unknown = null;
+      let _parseFailed = false;
+      let parsedBody: unknown = null;
+      try {
+        parsedBody = JSON.parse(rawBody);
+        if (typeof parsedBody === 'object' && parsedBody !== null && 'action' in parsedBody) {
+          action = parsedBody.action;
+        }
+      } catch {
+        _parseFailed = true;
+      }
+      if (_parseFailed) {
+        _isExplicitSync = false;
+      }
+      if (!_parseFailed) {
+        _isExplicitSync = action === 'sync';
+      }
+    }
+    if (_isExplicitSync === undefined) {
+      _isExplicitSync = false;
+    }
+    const isExplicitSync = _isExplicitSync;
+    if (!isExplicitSync) {
+      return Response.json(
+        {
+          owner,
+          name: repoName,
+          status: 'already_synced',
+          defaultBranch: existingMeta.defaultBranch,
+          notes: 0,
+        },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+    const outcome = await syncVault(
+      config.apiBaseUrl,
+      auth.token,
       bucket,
       owner,
       repoName,
-      config,
-      auth.token,
-      existingMeta,
+      'explicit',
     );
-    if (response !== null) {
-      return response;
+    if (!outcome.ok) {
+      if (outcome.reason === 'sync_conflict') {
+        return Response.json({ error: 'sync_conflict' }, { status: 409 });
+      }
+      return outcome.response;
     }
+    return Response.json(
+      {
+        owner,
+        name: repoName,
+        status: outcome.result.status,
+        defaultBranch: existingMeta.defaultBranch,
+        syncedAt: outcome.result.syncedAt,
+        pulled: outcome.result.pulled,
+        pushed: outcome.result.pushed,
+        conflicts: outcome.result.conflicts,
+        remaining: outcome.result.remaining,
+      },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
   }
   return performInitialSync({
     bucket,
@@ -176,16 +174,6 @@ export const POST = createRoute((c) =>
   handleVaultSyncPost(toRouteContext(c.env, c.req.raw, c.req.param())),
 );
 
-/** パスパラメータのヘルパー（handleVaultSyncGet / resolve で使う） */
-function requireVaultParams(context: RouteContext): { owner: string; repoName: string } | null {
-  const owner = paramToString(context.params.owner);
-  const repoName = paramToString(context.params.repo);
-  if (!isValidGitHubName(owner) || !isValidGitHubName(repoName)) {
-    return null;
-  }
-  return { owner, repoName };
-}
-
 /**
  * 同期状態: GET /api/vaults/:owner/:repo/sync
  *
@@ -194,10 +182,12 @@ function requireVaultParams(context: RouteContext): { owner: string; repoName: s
  */
 export async function handleVaultSyncGet(context: RouteContext): Promise<Response> {
   const { env } = context;
-  const params = requireVaultParams(context);
-  if (params === null) {
+  const _owner = paramToString(context.params.owner);
+  const _repoName = paramToString(context.params.repo);
+  if (!isValidGitHubName(_owner) || !isValidGitHubName(_repoName)) {
     return Response.json({ error: 'invalid_vault_ref' }, { status: 400 });
   }
+  const params = { owner: _owner, repoName: _repoName };
   const bucket = env.VAULT_BUCKET;
   if (!bucket) {
     return Response.json(

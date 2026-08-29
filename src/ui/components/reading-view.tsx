@@ -30,45 +30,6 @@ export type ReadingViewProps = {
   onSessionExpired: () => void;
 };
 
-/** 修飾キー付き / 中クリックか（ブラウザの新規タブ動作に任せる） */
-function isModifiedClick(event: MouseEvent): boolean {
-  return event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey;
-}
-
-/** クリック対象に最も近いノートリンク（data-note-path 付きアンカー）を返す */
-function noteAnchorFrom(target: EventTarget | null): Element | null {
-  if (!(target instanceof Element)) {
-    return null;
-  }
-  return target.closest('a[data-note-path]');
-}
-
-/** 読み込み失敗の画像を代替表示要素へ置き換える */
-function replaceWithImageFallback(event: SyntheticEvent): void {
-  const target = event.target;
-  if (!(target instanceof HTMLImageElement)) {
-    return;
-  }
-  const fallback = document.createElement('span');
-  fallback.className = 'note-embed-image-fallback';
-  fallback.textContent = `画像を読み込めませんでした: ${target.getAttribute('alt') ?? ''}`;
-  target.replaceWith(fallback);
-}
-
-/** WikiLink クリック: SPA 内遷移（props に依存しないためモジュール関数） */
-function handleContentClick(event: MouseEvent<HTMLDivElement>): void {
-  if (isModifiedClick(event)) {
-    return;
-  }
-  const anchor = noteAnchorFrom(event.target);
-  const href = anchor?.getAttribute('href');
-  if (anchor === null || !href) {
-    return;
-  }
-  event.preventDefault();
-  navigate(href);
-}
-
 /** ノート上部のフロントマテリア表示（プロパティ。表示のみ） */
 function FrontmatterDetails({
   fields,
@@ -137,8 +98,35 @@ export function ReadingView({
           <div
             className="reading-content"
             data-testid="reading-content"
-            onClick={handleContentClick}
-            onError={replaceWithImageFallback}
+            onClick={(event: MouseEvent<HTMLDivElement>): void => {
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.altKey ||
+                event.shiftKey
+              ) {
+                return;
+              }
+              const target = event.target;
+              const anchor = target instanceof Element ? target.closest('a[data-note-path]') : null;
+              const href = anchor?.getAttribute('href');
+              if (anchor === null || !href) {
+                return;
+              }
+              event.preventDefault();
+              navigate(href);
+            }}
+            onError={(event: SyntheticEvent): void => {
+              const target = event.target;
+              if (!(target instanceof HTMLImageElement)) {
+                return;
+              }
+              const fallback = document.createElement('span');
+              fallback.className = 'note-embed-image-fallback';
+              fallback.textContent = `画像を読み込めませんでした: ${target.getAttribute('alt') ?? ''}`;
+              target.replaceWith(fallback);
+            }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
         </>

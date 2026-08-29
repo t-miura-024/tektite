@@ -161,7 +161,25 @@ export function parseSyncBody(body: unknown): VaultSyncResult | null {
   ) {
     return null;
   }
-  const conflicts = parseConflicts(body.conflicts);
+  const conflicts = ((): VaultSyncConflict[] | undefined => {
+    const value: unknown = body.conflicts;
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const parsed: VaultSyncConflict[] = [];
+    for (const item of value) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      const path = readString(item.path);
+      if (!path || typeof item.local !== 'string' || typeof item.remote !== 'string') {
+        continue;
+      }
+      const remoteSha = readString(item.remoteSha);
+      parsed.push({ path, local: item.local, remote: item.remote, remoteSha });
+    }
+    return parsed;
+  })();
   return {
     owner,
     name,
@@ -174,26 +192,6 @@ export function parseSyncBody(body: unknown): VaultSyncResult | null {
     ...(conflicts !== undefined ? { conflicts } : {}),
     ...(typeof body.remaining === 'number' ? { remaining: body.remaining } : {}),
   };
-}
-
-/** 同期衝突列を読む（配列でなければ undefined） */
-function parseConflicts(value: unknown): VaultSyncConflict[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const conflicts: VaultSyncConflict[] = [];
-  for (const item of value) {
-    if (!isRecord(item)) {
-      continue;
-    }
-    const path = readString(item.path);
-    if (!path || typeof item.local !== 'string' || typeof item.remote !== 'string') {
-      continue;
-    }
-    const remoteSha = readString(item.remoteSha);
-    conflicts.push({ path, local: item.local, remote: item.remote, remoteSha });
-  }
-  return conflicts;
 }
 
 /** /api/vaults/:owner/:repo/sync（GET）の応答を VaultSyncStatus にパースする */

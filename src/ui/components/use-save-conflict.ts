@@ -111,7 +111,8 @@ function useConflictOverwrite(
         onSessionExpired();
         return;
       }
-      if (await reenterOnConflict(error, current.local, enterConflict)) {
+      if (isNoteSaveError(error) && error.kind === 'conflict') {
+        await enterConflict(current.local);
         return;
       }
       notify(noteSaveErrorMessage(error), {
@@ -127,8 +128,7 @@ function useConflictOverwrite(
 function useConflictAdopt(core: NotePaneCore): () => Promise<void> {
   const { owner, name, notePath, props, shaRef, contentRef, generationRef, conflictRef } = core;
 
-  /** 競合解決: リモートの内容を取り込み、編集中の変更を破棄する */
-  async function handleAdopt(): Promise<void> {
+  return async (): Promise<void> => {
     const current = core.conflict;
     if (!current) {
       return;
@@ -147,24 +147,5 @@ function useConflictAdopt(core: NotePaneCore): () => Promise<void> {
     core.setConflict(null);
     core.setEditorContent(current.remote.content);
     core.setDirty(false);
-  }
-
-  return handleAdopt;
-}
-
-/** 解決中にさらに競合が起きた場合は差分を更新して true を返す */
-async function reenterOnConflict(
-  error: unknown,
-  local: string,
-  enterConflict: (local: string) => Promise<void>,
-): Promise<boolean> {
-  if (isSessionExpiredError(error)) {
-    return false;
-  }
-  if (isNoteSaveError(error) && error.kind === 'conflict') {
-    // 解決中にさらにリモートが変わった — 差分を更新して再選択させる
-    await enterConflict(local);
-    return true;
-  }
-  return false;
+  };
 }

@@ -123,42 +123,21 @@ export function buildDuplicate(
   | { readonly ok: true; readonly changes: FileChange[]; readonly result: FileOperationResult }
   | { readonly ok: false; readonly error: FileCommitError } {
   if (operation.kind === 'duplicate-note') {
-    return buildDuplicateNote(operation, existing);
+    if (!isValidPath(operation.to) || !operation.to.endsWith('.md')) {
+      return validationFailure('複製先のノートパスが不正です。');
+    }
+    if (!existing.has(operation.from.toLowerCase())) {
+      return validationFailure(`「${operation.from}」は存在しません。`);
+    }
+    if (existing.has(operation.to.toLowerCase())) {
+      return validationFailure(`「${operation.to}」は既に存在します。`);
+    }
+    return {
+      ok: true,
+      changes: [{ op: 'copy', path: operation.from, to: operation.to }],
+      result: { removedPaths: [], movedPaths: [], createdPaths: [operation.to], issues: [] },
+    };
   }
-  return buildDuplicateDirectory(operation, filePaths, existing);
-}
-
-/** ノート複製 1 件の検証と変更列の組み立て */
-function buildDuplicateNote(
-  operation: Extract<FileOperation, { kind: 'duplicate-note' }>,
-  existing: Set<string>,
-):
-  | { readonly ok: true; readonly changes: FileChange[]; readonly result: FileOperationResult }
-  | { readonly ok: false; readonly error: FileCommitError } {
-  if (!isValidPath(operation.to) || !operation.to.endsWith('.md')) {
-    return validationFailure('複製先のノートパスが不正です。');
-  }
-  if (!existing.has(operation.from.toLowerCase())) {
-    return validationFailure(`「${operation.from}」は存在しません。`);
-  }
-  if (existing.has(operation.to.toLowerCase())) {
-    return validationFailure(`「${operation.to}」は既に存在します。`);
-  }
-  return {
-    ok: true,
-    changes: [{ op: 'copy', path: operation.from, to: operation.to }],
-    result: { removedPaths: [], movedPaths: [], createdPaths: [operation.to], issues: [] },
-  };
-}
-
-/** ディレクトリ複製の検証と変更列の組み立て（配下全ファイルの copy） */
-function buildDuplicateDirectory(
-  operation: Extract<FileOperation, { kind: 'duplicate-directory' }>,
-  filePaths: readonly string[],
-  existing: Set<string>,
-):
-  | { readonly ok: true; readonly changes: FileChange[]; readonly result: FileOperationResult }
-  | { readonly ok: false; readonly error: FileCommitError } {
   if (!isValidPath(operation.to)) {
     return validationFailure('複製先のディレクトリパスが不正です。');
   }

@@ -82,18 +82,6 @@ export async function readBranchState(
       return { ok: false, response: githubErrorResponse };
     }
   }
-  return readBaseTreeState(base, token, owner, repoName, branch, headCommitSha);
-}
-
-/** ステップ 3: base tree sha とパス → blob sha 対応を読む（404 は空リポジトリ扱い） */
-async function readBaseTreeState(
-  base: string,
-  token: string,
-  owner: string,
-  repoName: string,
-  branch: string,
-  headCommitSha: string | null,
-): Promise<{ ok: true; state: BranchState } | { ok: false; response: Response }> {
   const treeFetched = await fetchApi(
     base,
     `/repos/${owner}/${repoName}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
@@ -118,17 +106,9 @@ async function readBaseTreeState(
   if (baseTreeSha === null || !Array.isArray(entries)) {
     return { ok: false, response: githubErrorResponse };
   }
-  return {
-    ok: true,
-    state: { headCommitSha, baseTreeSha, blobShaByPath: collectBlobShas(entries) },
-  };
-}
-
-/** tree エントリ列から path → blob sha 対応を集める */
-function collectBlobShas(entries: readonly unknown[]): Map<string, string> {
   const blobShaByPath = new Map<string, string>();
   for (const entry of entries) {
-    if (!isRecordObject(entry)) {
+    if (typeof entry !== 'object' || entry === null) {
       continue;
     }
     const entryPath = readNonEmptyStringField(entry, 'path');
@@ -137,11 +117,10 @@ function collectBlobShas(entries: readonly unknown[]): Map<string, string> {
       blobShaByPath.set(entryPath, entrySha);
     }
   }
-  return blobShaByPath;
-}
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return {
+    ok: true,
+    state: { headCommitSha, baseTreeSha, blobShaByPath },
+  };
 }
 
 /** fetch の失敗を github_unreachable（502）に変換して fetch する */

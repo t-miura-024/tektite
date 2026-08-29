@@ -55,19 +55,6 @@ function isErrorNamed(error: unknown, name: string): boolean {
   return error instanceof Error && error.name === name;
 }
 
-/** ツリーキャッシュのエントリ（path → sha）を Map にする */
-function cachedTreeFileShas(tree: CachedVaultTree | null): Map<string, string | null> {
-  const map = new Map<string, string | null>();
-  if (tree !== null) {
-    for (const entry of tree.entries) {
-      if (entry.type === 'file') {
-        map.set(entry.path, entry.sha);
-      }
-    }
-  }
-  return map;
-}
-
 /** ツリーキャッシュのエントリ列を構築する（GitHub ツリーが正。前回のディレクトリは再構成） */
 export function buildTreeEntries(
   ghMap: Map<string, string>,
@@ -124,7 +111,14 @@ export async function pushPendingChanges(
   conflictPaths: ReadonlySet<string>,
 ): Promise<number> {
   const cachedTree = await readVaultTree(bucket, owner, repoName);
-  const cachedShas = cachedTreeFileShas(cachedTree);
+  const cachedShas = new Map<string, string | null>();
+  if (cachedTree !== null) {
+    for (const entry of cachedTree.entries) {
+      if (entry.type === 'file') {
+        cachedShas.set(entry.path, entry.sha);
+      }
+    }
+  }
 
   const changes: ParsedChange[] = [];
 
@@ -139,7 +133,45 @@ export async function pushPendingChanges(
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- dirty ファイルを順に読み込むため
-    await collectDirtyChanges(bucket, owner, repoName, path, ghMap, cachedShas, r2Paths, changes);
+    const ghSha = ghMap.get(path);
+    // ノート（Markdown）として読む。null なら添付（raw）として扱う
+    const note = await readCachedNote(bucket, owner, repoName, path);
+    if (note !== null) {
+      r2Paths.add(path);
+      if (ghSha === undefined) {
+        // R2 にあり GitHub に無い → ローカル新規のみ作成（前回同期時点に存在した
+        // = GitHub 側で削除された → 復活させない）
+        if (cachedShas.get(path) === null) {
+          changes.push({
+            op: 'create',
+            path,
+            to: null,
+            content: encodeBase64Content(note.content),
+          });
+        }
+      }
+      if (ghSha !== undefined && note.sha !== ghSha) {
+        changes.push({ op: 'update', path, to: null, content: encodeBase64Content(note.content) });
+      }
+    }
+    if (note === null) {
+      const raw = await readCachedRaw(bucket, owner, repoName, path);
+      if (raw !== null) {
+        r2Paths.add(path);
+        const base64 = encodeBase64Bytes(new Uint8Array(raw.body));
+        if (ghSha === undefined) {
+          if (cachedShas.get(path) === null) {
+            changes.push({ op: 'create', path, to: null, content: base64 });
+          }
+        }
+        if (ghSha !== undefined) {
+          const blobSha = await gitBlobShaHex(new Uint8Array(raw.body));
+          if (blobSha !== ghSha) {
+            changes.push({ op: 'update', path, to: null, content: base64 });
+          }
+        }
+      }
+    }
   }
 
   // R2 で削除されたファイル → GitHub からも削除する。
@@ -173,55 +205,4 @@ export async function pushPendingChanges(
     throw syncPushError(result.response);
   }
   return changes.length;
-}
-
-/** dirty パス 1 件の差分を changes へ追加する（ノート / 添付の両系統） */
-async function collectDirtyChanges(
-  bucket: R2Bucket,
-  owner: string,
-  repoName: string,
-  path: string,
-  ghMap: ReadonlyMap<string, string>,
-  cachedShas: ReadonlyMap<string, string | null>,
-  r2Paths: Set<string>,
-  changes: ParsedChange[],
-): Promise<void> {
-  const ghSha = ghMap.get(path);
-  // ノート（Markdown）として読む。null なら添付（raw）として扱う
-  const note = await readCachedNote(bucket, owner, repoName, path);
-  if (note !== null) {
-    r2Paths.add(path);
-    if (ghSha === undefined) {
-      // R2 にあり GitHub に無い → ローカル新規のみ作成（前回同期時点に存在した
-      // = GitHub 側で削除された → 復活させない）
-      if (cachedShas.get(path) === null) {
-        changes.push({
-          op: 'create',
-          path,
-          to: null,
-          content: encodeBase64Content(note.content),
-        });
-      }
-      return;
-    }
-    if (note.sha !== ghSha) {
-      changes.push({ op: 'update', path, to: null, content: encodeBase64Content(note.content) });
-    }
-    return;
-  }
-  const raw = await readCachedRaw(bucket, owner, repoName, path);
-  if (raw !== null) {
-    r2Paths.add(path);
-    const base64 = encodeBase64Bytes(new Uint8Array(raw.body));
-    if (ghSha === undefined) {
-      if (cachedShas.get(path) === null) {
-        changes.push({ op: 'create', path, to: null, content: base64 });
-      }
-      return;
-    }
-    const blobSha = await gitBlobShaHex(new Uint8Array(raw.body));
-    if (blobSha !== ghSha) {
-      changes.push({ op: 'update', path, to: null, content: base64 });
-    }
-  }
 }

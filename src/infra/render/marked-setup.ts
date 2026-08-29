@@ -9,12 +9,7 @@
  *   （marked の token 型は任意フィールドを any としてしか読めないため）
  */
 
-import {
-  Marked,
-  type RendererObject,
-  type TokenizerAndRendererExtension,
-  type Tokens,
-} from 'marked';
+import { Marked, type RendererObject, type Tokens } from 'marked';
 import type { HLJSApi } from 'highlight.js';
 
 import { escapeHtml } from '@/infra/render/escape';
@@ -36,69 +31,6 @@ type CalloutData = {
  * marked は同じ token インスタンスを renderer へ渡すため、参照で引ける。
  */
 const calloutDataByToken = new WeakMap<object, CalloutData>();
-
-/**
- * コールアウト（> [!note] など）のブロック拡張。
- * `> [!type] title` で始まる引用ブロックを専用トークンにし、コールアウト
- * UI に変換する。マーカーがない通常の引用は built-in の blockquote が担う。
- */
-function createCalloutExtension(marked: Marked): TokenizerAndRendererExtension {
-  return {
-    name: 'callout',
-    level: 'block',
-    start(src: string): number | void {
-      return src.startsWith('>') ? 0 : undefined;
-    },
-    tokenizer(src: string): Tokens.Generic | undefined {
-      const lines = src.split('\n');
-      const quoted: string[] = [];
-      let index = 0;
-      for (;;) {
-        const match = /^ {0,3}> ?(.*)$/.exec(lines[index] ?? '');
-        if (!match) {
-          break;
-        }
-        quoted.push(match[1] ?? '');
-        index += 1;
-      }
-      if (quoted.length === 0) {
-        return undefined;
-      }
-      const marker = CALL_OUT_MARKER_RE.exec(quoted[0] ?? '');
-      if (!marker) {
-        return undefined;
-      }
-      let raw = lines.slice(0, index).join('\n');
-      if (index < lines.length || src.endsWith('\n')) {
-        raw += '\n';
-      }
-      const type = (marker[1] ?? '').toLowerCase();
-      const title = (marker[2] ?? '').trim();
-      const resolvedType = type === '' ? 'note' : type;
-      const callout: CalloutData = {
-        type: resolvedType,
-        title: title === '' ? resolvedType : title,
-        body: quoted.slice(1).join('\n'),
-      };
-      const token: Tokens.Generic = {
-        type: 'callout',
-        raw,
-        tokens: [],
-      };
-      calloutDataByToken.set(token, callout);
-      return token;
-    },
-    renderer(token: Tokens.Generic): string {
-      const fallback: CalloutData = { type: 'note', title: 'note', body: '' };
-      const callout = calloutDataByToken.get(token) ?? fallback;
-      return (
-        `<div class="callout callout-${escapeHtml(callout.type)}">` +
-        `<div class="callout-title">${escapeHtml(callout.title)}</div>` +
-        `<div class="callout-body">${marked.parse(callout.body)}</div></div>`
-      );
-    },
-  };
-}
 
 /**
  * リーディング表示用の Marked インスタンスを組み立てる。
@@ -130,6 +62,64 @@ export function createMarked(hljs: HLJSApi | null): Marked {
   };
 
   const marked = new Marked({ gfm: true, renderer });
-  marked.use({ extensions: [createCalloutExtension(marked)] });
+  marked.use({
+    extensions: [
+      {
+        name: 'callout',
+        level: 'block',
+        start(src: string): number | void {
+          return src.startsWith('>') ? 0 : undefined;
+        },
+        tokenizer(src: string): Tokens.Generic | undefined {
+          const lines = src.split('\n');
+          const quoted: string[] = [];
+          let index = 0;
+          for (;;) {
+            const match = /^ {0,3}> ?(.*)$/.exec(lines[index] ?? '');
+            if (!match) {
+              break;
+            }
+            quoted.push(match[1] ?? '');
+            index += 1;
+          }
+          if (quoted.length === 0) {
+            return undefined;
+          }
+          const marker = CALL_OUT_MARKER_RE.exec(quoted[0] ?? '');
+          if (!marker) {
+            return undefined;
+          }
+          let raw = lines.slice(0, index).join('\n');
+          if (index < lines.length || src.endsWith('\n')) {
+            raw += '\n';
+          }
+          const type = (marker[1] ?? '').toLowerCase();
+          const title = (marker[2] ?? '').trim();
+          const resolvedType = type === '' ? 'note' : type;
+          const callout: CalloutData = {
+            type: resolvedType,
+            title: title === '' ? resolvedType : title,
+            body: quoted.slice(1).join('\n'),
+          };
+          const token: Tokens.Generic = {
+            type: 'callout',
+            raw,
+            tokens: [],
+          };
+          calloutDataByToken.set(token, callout);
+          return token;
+        },
+        renderer(token: Tokens.Generic): string {
+          const fallback: CalloutData = { type: 'note', title: 'note', body: '' };
+          const callout = calloutDataByToken.get(token) ?? fallback;
+          return (
+            `<div class="callout callout-${escapeHtml(callout.type)}">` +
+            `<div class="callout-title">${escapeHtml(callout.title)}</div>` +
+            `<div class="callout-body">${marked.parse(callout.body)}</div></div>`
+          );
+        },
+      },
+    ],
+  });
   return marked;
 }

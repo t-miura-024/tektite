@@ -17,8 +17,8 @@ import { fetchRawFromGithub, tryServeRawFromR2 } from '@/api/_lib/raw-helpers';
  *
  * パスはノート取得（/api/notes）と同じく、パス全体（/ 区切り）を 1 セグメント
  * にパーセントエンコードして受け取る（例: attachments%2Flogo.png）。
- * パラメータは実行環境によりデコード済みの場合があるため、decodeSegment が
- * 二重デコードを防ぎながら元のパスを復元する。
+ * パラメータは実行環境によりデコード済みの場合があるため、元のパスを復元する
+ * 際は二重デコードを防ぎながらデコードする。
  *
  * 応答:
  * - パラメータ不正                 → 400 { error: 'invalid_vault_ref' | 'invalid_raw_path' }
@@ -38,33 +38,6 @@ function paramToString(value: string | string[] | undefined): string {
   return value ?? '';
 }
 
-/** パスセグメントの URL デコード（不正なパーセントエスケープは元の文字列を採用） */
-function decodeSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
-}
-
-/** パスパラメータ（パス全体を 1 セグメントにエンコードしたもの）をパスに復元する */
-function resolveRawPath(value: string | string[] | undefined): string | null {
-  const rawPath = paramToString(value);
-  const path = decodeSegment(rawPath)
-    .split('/')
-    .filter((segment) => segment.length > 0)
-    .join('/');
-  return path.length === 0 ? null : path;
-}
-
-/** パスを Contents API の URL パス（セグメント単位でエンコード）に変換する */
-function encodeRawPath(rawPath: string): string {
-  return rawPath
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
-}
-
 export async function handleRawGet(context: RouteContext): Promise<Response> {
   const { env, request, params } = context;
   const owner = paramToString(params.owner);
@@ -72,7 +45,18 @@ export async function handleRawGet(context: RouteContext): Promise<Response> {
   if (!isValidGitHubName(owner) || !isValidGitHubName(repoName)) {
     return Response.json({ error: 'invalid_vault_ref' }, { status: 400 });
   }
-  const rawPath = resolveRawPath(params.path);
+  const _rawPathParam = paramToString(params.path);
+  let _decoded: string;
+  try {
+    _decoded = decodeURIComponent(_rawPathParam);
+  } catch {
+    _decoded = _rawPathParam;
+  }
+  const _normalized = _decoded
+    .split('/')
+    .filter((segment) => segment.length > 0)
+    .join('/');
+  const rawPath = _normalized.length === 0 ? null : _normalized;
   if (rawPath === null) {
     return Response.json({ error: 'invalid_raw_path' }, { status: 400 });
   }
@@ -104,7 +88,11 @@ export async function handleRawGet(context: RouteContext): Promise<Response> {
     rawPath,
     config.apiBaseUrl,
     auth.token,
-    encodeRawPath,
+    (p: string) =>
+      p
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/'),
   );
 }
 

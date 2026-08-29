@@ -16,32 +16,6 @@ import { Effect, Layer } from 'effect';
 
 import { sessionFetchError, SessionGateway, type Session } from '@/application/session';
 
-/** /api/auth/me 応答から認証済みフラグを読む（形式不正は false） */
-function readAuthenticated(body: unknown): boolean {
-  return typeof body === 'object' && body !== null && 'authenticated' in body
-    ? body.authenticated === true
-    : false;
-}
-
-/** /api/auth/me 応答からログイン名を読む（形式不正は null） */
-function readLogin(body: unknown): string | null {
-  if (typeof body === 'object' && body !== null && 'login' in body) {
-    const login = body.login;
-    return typeof login === 'string' && login.length > 0 ? login : null;
-  }
-  return null;
-}
-
-function toSession(body: unknown): Session {
-  if (readAuthenticated(body)) {
-    const login = readLogin(body);
-    if (login !== null) {
-      return { status: 'authenticated', user: { login } };
-    }
-  }
-  return { status: 'anonymous' };
-}
-
 /** SessionGateway の本番実装（Pages Functions 経由） */
 export const SessionGatewayLive = Layer.succeed(SessionGateway, {
   getCurrentSession: () =>
@@ -64,7 +38,21 @@ export const SessionGatewayLive = Layer.succeed(SessionGateway, {
         catch: (error) =>
           sessionFetchError('セッション状態を確認できませんでした。', { cause: error }),
       });
-      return toSession(body);
+      return ((): Session => {
+        const authenticated =
+          typeof body === 'object' && body !== null && 'authenticated' in body
+            ? body.authenticated === true
+            : false;
+        if (authenticated) {
+          const loginValue =
+            typeof body === 'object' && body !== null && 'login' in body ? body.login : null;
+          const login = typeof loginValue === 'string' && loginValue.length > 0 ? loginValue : null;
+          if (login !== null) {
+            return { status: 'authenticated', user: { login } };
+          }
+        }
+        return { status: 'anonymous' };
+      })();
     }),
 
   logout: () =>

@@ -49,17 +49,6 @@ export function collectDirectories(root: TreeDirectory): string[] {
   return paths;
 }
 
-/** ディレクトリ自身とその配下（自身を自身の中へ移動できないようにする） */
-function descendants(path: string, directories: readonly string[]): Set<string> {
-  const blocked = new Set<string>();
-  for (const directory of directories) {
-    if (directory === path || directory.startsWith(`${path}/`)) {
-      blocked.add(directory);
-    }
-  }
-  return blocked;
-}
-
 /**
  * 移動ダイアログの禁止先（自分自身の配下。ファイルは現在の親ディレクトリも）。
  * ファイルを現在の親へ「移動」すると to === from になり、
@@ -69,7 +58,12 @@ export function blockedMoveTargets(
   target: { readonly path: string; readonly type: 'file' | 'directory' },
   directories: readonly string[],
 ): Set<string> {
-  const blocked = descendants(target.path, directories);
+  const blocked = new Set<string>();
+  for (const directory of directories) {
+    if (directory === target.path || directory.startsWith(`${target.path}/`)) {
+      blocked.add(directory);
+    }
+  }
   if (target.type === 'file') {
     const lastSlash = target.path.lastIndexOf('/');
     blocked.add(lastSlash === -1 ? '' : target.path.slice(0, lastSlash));

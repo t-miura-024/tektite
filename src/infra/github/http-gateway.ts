@@ -55,7 +55,12 @@ const invalidNoteSaveResponse = (): Effect.Effect<never, ReturnType<typeof noteS
 function syncRequest(path: string, body: unknown): Effect.Effect<Response, VaultFetchError> {
   return Effect.gen(function* () {
     const response = yield* Effect.tryPromise({
-      try: () => fetch(path, jsonInit(body)),
+      try: () =>
+        fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
       catch: (error) =>
         vaultFetchError('network', 'サーバーと通信できませんでした。', { cause: error }),
     });
@@ -75,15 +80,6 @@ function syncRequest(path: string, body: unknown): Effect.Effect<Response, Vault
           vaultFetchError('server', `同期に失敗しました（HTTP ${response.status}）。`),
         );
   });
-}
-
-/** 同期系 POST の JSON ボディ付き RequestInit */
-function jsonInit(body: unknown): RequestInit {
-  return {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  };
 }
 
 /** 同期系 POST の JSON 応答を読む（形式不正は server エラー） */

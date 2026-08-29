@@ -66,36 +66,33 @@ export function useNoteSave(core: NotePaneCore): NoteSaveActions {
     return (): void => window.removeEventListener('keydown', onKeyDown);
   }, [contentRef]);
 
-  /** 自動保存トリガー: エディタからのフォーカス喪失（単一ルール） */
-  function handleEditorBlur(): void {
-    if (core.draftNotice !== null) {
-      // Draft 復元通知表示中の blur（ボタンへのフォーカス移動を含む）では自動保存しない
-      return;
-    }
-    if (suppressBlurRef.current) {
-      // タイトル編集へのクリック移動中（pointerdown で立てたフラグ）は自動保存しない
-      suppressBlurRef.current = false;
-      return;
-    }
-    if (isPending) {
-      // 未確定ノート: タイトル未編集なら Untitled.md として自動コミットする（Q18:1）
-      if (!savingRef.current && readyRef.current) {
-        void performSave(contentRef.current);
-      }
-      return;
-    }
-    if (!dirtyRef.current || savingRef.current || conflictRef.current || !readyRef.current) {
-      return;
-    }
-    void performSave(contentRef.current);
-  }
-
   const { handleOverwrite, handleAdopt } = useSaveConflictResolution(core, enterConflict);
 
   return {
     flushDraft,
     performSave,
-    handleEditorBlur,
+    handleEditorBlur: (): void => {
+      if (core.draftNotice !== null) {
+        // Draft 復元通知表示中の blur（ボタンへのフォーカス移動を含む）では自動保存しない
+        return;
+      }
+      if (suppressBlurRef.current) {
+        // タイトル編集へのクリック移動中（pointerdown で立てたフラグ）は自動保存しない
+        suppressBlurRef.current = false;
+        return;
+      }
+      if (isPending) {
+        // 未確定ノート: タイトル未編集なら Untitled.md として自動コミットする（Q18:1）
+        if (!savingRef.current && readyRef.current) {
+          void performSave(contentRef.current);
+        }
+        return;
+      }
+      if (!dirtyRef.current || savingRef.current || conflictRef.current || !readyRef.current) {
+        return;
+      }
+      void performSave(contentRef.current);
+    },
     handleOverwrite,
     handleAdopt,
     restoreDraft,

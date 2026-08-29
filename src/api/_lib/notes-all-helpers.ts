@@ -15,55 +15,6 @@ type GithubEntry = {
   sha?: unknown;
 };
 
-function readTreeEntries(body: unknown): GithubEntry[] | null {
-  if (!isRecordObject(body) || !Array.isArray(body.tree)) {
-    return null;
-  }
-  const entries: GithubEntry[] = [];
-  for (const item of body.tree) {
-    if (isRecordObject(item)) {
-      entries.push({ type: item.type, path: item.path, sha: item.sha });
-    }
-  }
-  return entries;
-}
-
-function readBlobBase64Content(body: unknown): string | null {
-  if (!isRecordObject(body) || body.encoding !== 'base64' || typeof body.content !== 'string') {
-    return null;
-  }
-  return body.content;
-}
-
-function decodeBase64Content(encoded: string): string {
-  const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-async function fetchBlobContent(
-  baseUrl: string,
-  token: string,
-  owner: string,
-  repoName: string,
-  sha: string,
-): Promise<string | null> {
-  let response: Response;
-  try {
-    response = await githubApiFetch(
-      baseUrl,
-      `/repos/${owner}/${repoName}/git/blobs/${encodeURIComponent(sha)}`,
-      token,
-    );
-  } catch {
-    return null;
-  }
-  if (!response.ok) {
-    return null;
-  }
-  const content = readBlobBase64Content(await response.json().catch(() => null));
-  return content === null ? null : decodeBase64Content(content);
-}
-
 /** R2 キャッシュがあればそこから返す（ヒットすれば Response） */
 export async function tryServeFromR2(
   bucket: R2Bucket | undefined,
@@ -150,7 +101,18 @@ export async function fetchTreeEntries(
     return { ok: false, response: treeFailure };
   }
   const treeResponseBody = await readJsonBody(treeResponse);
-  const treeEntries = readTreeEntries(treeResponseBody);
+  const treeEntries: GithubEntry[] | null = ((): GithubEntry[] | null => {
+    if (!isRecordObject(treeResponseBody) || !Array.isArray(treeResponseBody.tree)) {
+      return null;
+    }
+    const entries: GithubEntry[] = [];
+    for (const item of treeResponseBody.tree) {
+      if (isRecordObject(item)) {
+        entries.push({ type: item.type, path: item.path, sha: item.sha });
+      }
+    }
+    return entries;
+  })();
   if (treeEntries === null) {
     return { ok: false, response: Response.json({ error: 'github_error' }, { status: 502 }) };
   }
@@ -199,8 +161,36 @@ export async function fetchNotesChunked(
     // oxlint-disable-next-line no-await-in-loop -- 同時実行数を 8 に制限する意図的なチャンク処理
     const chunkResults = await Promise.all(
       chunk.map(async ({ path, sha }) => {
-        const content = await fetchBlobContent(apiBaseUrl, token, owner, repoName, sha);
-        return content === null ? null : { path, sha, content };
+        let response: Response;
+        try {
+          response = await githubApiFetch(
+            apiBaseUrl,
+            `/repos/${owner}/${repoName}/git/blobs/${encodeURIComponent(sha)}`,
+            token,
+          );
+        } catch {
+          return null;
+        }
+        if (!response.ok) {
+          return null;
+        }
+        const rawBody: unknown = await response.json().catch(() => null);
+        const base64Content: string | null = ((): string | null => {
+          if (
+            !isRecordObject(rawBody) ||
+            rawBody.encoding !== 'base64' ||
+            typeof rawBody.content !== 'string'
+          ) {
+            return null;
+          }
+          return rawBody.content;
+        })();
+        if (base64Content === null) {
+          return null;
+        }
+        const bytes = Uint8Array.from(atob(base64Content), (char) => char.charCodeAt(0));
+        const content = new TextDecoder().decode(bytes);
+        return { path, sha, content };
       }),
     );
     for (const result of chunkResults) {

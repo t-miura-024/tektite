@@ -2,32 +2,26 @@ import { githubApiFetch, githubUnreachable, mapGithubFailure } from '@/api/_lib/
 import { readField, readJsonBody, readNonEmptyStringField } from '@/api/_lib/github-json';
 import { readVaultMeta, readVaultTree, writeVaultTree } from '@/api/_lib/r2-vault';
 
-type GithubTreeItem = Record<string, unknown>;
-
-function isRecordObject(value: unknown): value is GithubTreeItem {
-  return typeof value === 'object' && value !== null;
-}
-
 /** ツリーエントリ 1 件を file / directory のエントリへ変換する（対象外は null） */
 export function collectTreeEntry(
   item: unknown,
 ): { path: string; type: 'file' | 'directory'; sha: string | null } | null {
-  if (!isRecordObject(item)) {
+  if (typeof item !== 'object' || item === null) {
+    return null;
+  }
+  if (!('path' in item) || typeof item.path !== 'string' || item.path.length === 0) {
     return null;
   }
   const path = item.path;
-  if (typeof path !== 'string' || path.length === 0) {
-    return null;
-  }
-  if (item.type === 'blob') {
-    const sha = item.sha;
+  if ('type' in item && item.type === 'blob') {
+    const sha = 'sha' in item ? item.sha : undefined;
     return {
       path,
       type: 'file',
       sha: typeof sha === 'string' && sha.length > 0 ? sha : null,
     };
   }
-  if (item.type === 'tree') {
+  if ('type' in item && item.type === 'tree') {
     return { path, type: 'directory', sha: null };
   }
   return null;

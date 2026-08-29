@@ -54,58 +54,57 @@ export function buildDelta(
   // move/delete/copy は即座に差分エントリへ反映する
   const blobOps: { readonly path: string; readonly content: string }[] = [];
   for (const change of changes) {
-    const failure = applyChange(change, blobShaByPath, delta, blobOps);
+    let failure: Response | null = null;
+    if (change.op === 'create' || change.op === 'update') {
+      if (change.content === null) {
+        // 呼び出し側の検証（parseCommitBody）で保証されるため到達しない（型の防御線）
+        failure = invalidBodyResponse;
+      }
+      if (failure === null && change.content !== null) {
+        blobOps.push({ path: change.path, content: change.content });
+      }
+    }
+    if (change.op === 'delete') {
+      delta.set(change.path, { path: change.path, mode: '100644', type: 'blob', sha: null });
+    }
+    if (change.op === 'move') {
+      // move: base tree の blob sha を再利用して移動先に引き継ぎ、元パスを削除する
+      if (change.to === null) {
+        // 呼び出し側の検証で保証されるため到達しない（型の防御線）
+        failure = invalidBodyResponse;
+      }
+      if (failure === null && change.to !== null) {
+        const sourceSha = blobShaByPath.get(change.path);
+        if (!sourceSha) {
+          failure = invalidChangeResponse(`移動元「${change.path}」が見つかりません。`);
+        }
+        if (failure === null && sourceSha) {
+          delta.set(change.to, { path: change.to, mode: '100644', type: 'blob', sha: sourceSha });
+          delta.set(change.path, { path: change.path, mode: '100644', type: 'blob', sha: null });
+        }
+      }
+    }
+    if (change.op === 'copy') {
+      // copy: base tree の blob sha を再利用して複製先に置く（元パスは残す）
+      if (change.to === null) {
+        // 呼び出し側の検証で保証されるため到達しない（型の防御線）
+        failure = invalidBodyResponse;
+      }
+      if (failure === null && change.to !== null) {
+        const sourceSha = blobShaByPath.get(change.path);
+        if (!sourceSha) {
+          failure = invalidChangeResponse(`複製元「${change.path}」が見つかりません。`);
+        }
+        if (failure === null && sourceSha) {
+          delta.set(change.to, { path: change.to, mode: '100644', type: 'blob', sha: sourceSha });
+        }
+      }
+    }
     if (failure !== null) {
       return { ok: false, response: failure };
     }
   }
   return { ok: true, delta, blobOps };
-}
-
-/** 変更 1 件を差分へ反映する。検証エラーがあればエラー応答を返す */
-function applyChange(
-  change: ParsedChange,
-  blobShaByPath: ReadonlyMap<string, string>,
-  delta: Map<string, DeltaEntry>,
-  blobOps: { path: string; content: string }[],
-): Response | null {
-  if (change.op === 'create' || change.op === 'update') {
-    if (change.content === null) {
-      // 呼び出し側の検証（parseCommitBody）で保証されるため到達しない（型の防御線）
-      return invalidBodyResponse;
-    }
-    blobOps.push({ path: change.path, content: change.content });
-    return null;
-  }
-  if (change.op === 'delete') {
-    delta.set(change.path, { path: change.path, mode: '100644', type: 'blob', sha: null });
-    return null;
-  }
-  if (change.op === 'move') {
-    // move: base tree の blob sha を再利用して移動先に引き継ぎ、元パスを削除する
-    if (change.to === null) {
-      // 呼び出し側の検証で保証されるため到達しない（型の防御線）
-      return invalidBodyResponse;
-    }
-    const sourceSha = blobShaByPath.get(change.path);
-    if (!sourceSha) {
-      return invalidChangeResponse(`移動元「${change.path}」が見つかりません。`);
-    }
-    delta.set(change.to, { path: change.to, mode: '100644', type: 'blob', sha: sourceSha });
-    delta.set(change.path, { path: change.path, mode: '100644', type: 'blob', sha: null });
-    return null;
-  }
-  // copy: base tree の blob sha を再利用して複製先に置く（元パスは残す）
-  if (change.to === null) {
-    // 呼び出し側の検証で保証されるため到達しない（型の防御線）
-    return invalidBodyResponse;
-  }
-  const sourceSha = blobShaByPath.get(change.path);
-  if (!sourceSha) {
-    return invalidChangeResponse(`複製元「${change.path}」が見つかりません。`);
-  }
-  delta.set(change.to, { path: change.to, mode: '100644', type: 'blob', sha: sourceSha });
-  return null;
 }
 
 /** Blob 作成結果 1 件 */
@@ -125,36 +124,26 @@ export async function createBlobs(
   blobOps: readonly { readonly path: string; readonly content: string }[],
 ): Promise<BlobResult[]> {
   return Promise.all(
-    blobOps.map(({ path, content }) => createBlob(base, token, owner, repoName, path, content)),
+    blobOps.map(async ({ path, content }): Promise<BlobResult> => {
+      let blobResponse: Response;
+      try {
+        blobResponse = await githubApiFetch(base, `/repos/${owner}/${repoName}/git/blobs`, token, {
+          method: 'POST',
+          body: JSON.stringify({ content, encoding: 'base64' }),
+        });
+      } catch {
+        return { ok: false, error: githubUnreachable() };
+      }
+      const blobFailure = mapGithubFailure(blobResponse);
+      if (blobFailure) {
+        return { ok: false, error: blobFailure };
+      }
+      const body: unknown = await readJsonBody(blobResponse);
+      const sha = readNonEmptyStringField(body, 'sha');
+      if (sha === null) {
+        return { ok: false, error: Response.json({ error: 'github_error' }, { status: 502 }) };
+      }
+      return { ok: true, path, sha };
+    }),
   );
-}
-
-/** Blob を 1 件作成する（base64 内容。失敗時は完成済みエラー応答） */
-async function createBlob(
-  base: string,
-  token: string,
-  owner: string,
-  repoName: string,
-  path: string,
-  content: string,
-): Promise<BlobResult> {
-  let blobResponse: Response;
-  try {
-    blobResponse = await githubApiFetch(base, `/repos/${owner}/${repoName}/git/blobs`, token, {
-      method: 'POST',
-      body: JSON.stringify({ content, encoding: 'base64' }),
-    });
-  } catch {
-    return { ok: false, error: githubUnreachable() };
-  }
-  const blobFailure = mapGithubFailure(blobResponse);
-  if (blobFailure) {
-    return { ok: false, error: blobFailure };
-  }
-  const body: unknown = await readJsonBody(blobResponse);
-  const sha = readNonEmptyStringField(body, 'sha');
-  if (sha === null) {
-    return { ok: false, error: Response.json({ error: 'github_error' }, { status: 502 }) };
-  }
-  return { ok: true, path, sha };
 }

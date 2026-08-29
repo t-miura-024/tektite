@@ -42,13 +42,6 @@ const unavailableStorage: KeyValueStorage = {
   },
 };
 
-/** ブラウザの localStorage を解決する（なければ unavailable スタブを返す） */
-function resolveBrowserStorage(): KeyValueStorage {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- globalThis の localStorage は実行環境依存のため境界で型を確定する
-  const storage = (globalThis as { localStorage?: KeyValueStorage }).localStorage;
-  return typeof storage === 'undefined' || storage === null ? unavailableStorage : storage;
-}
-
 /** 指定ストレージに DraftStore の実装を構築する（テストはここに差し替えストレージを渡す） */
 export function createDraftStoreLive(storage: KeyValueStorage): Layer.Layer<DraftStore> {
   return Layer.succeed(DraftStore, {
@@ -85,5 +78,7 @@ export function createDraftStoreLive(storage: KeyValueStorage): Layer.Layer<Draf
 }
 
 /** 本番実装（ブラウザの localStorage を使う） */
-export const DraftStoreLive: Layer.Layer<DraftStore> =
-  createDraftStoreLive(resolveBrowserStorage());
+export const DraftStoreLive: Layer.Layer<DraftStore> = createDraftStoreLive(
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- globalThis の localStorage は実行環境依存のため境界で型を確定する
+  (globalThis as { localStorage?: KeyValueStorage }).localStorage ?? unavailableStorage,
+);

@@ -67,12 +67,19 @@ export function useVaultLoader(args: UseVaultLoaderArgs): VaultLoader {
         // ツリー取得へ進む（R2 未設定環境のフォールバック。実エラーはトースト通知）
         setInitializing(true);
         setSyncProgress(null);
-        const expired = await runInitialSync(
-          { owner, name },
-          setSyncProgress,
-          notify,
-          onSessionExpired,
-        );
+        let expired = false;
+        try {
+          await run(initializeVault({ owner, name }, setSyncProgress));
+        } catch (error) {
+          if (isSessionExpiredError(error)) {
+            notify('セッションの有効期限が切れました。ログインし直してください。');
+            onSessionExpired();
+            expired = true;
+          }
+          if (!isSessionExpiredError(error)) {
+            notify(vaultErrorMessage(error));
+          }
+        }
         setInitializing(false);
         setSyncProgress(null);
         if (expired) {
@@ -96,7 +103,14 @@ export function useVaultLoader(args: UseVaultLoaderArgs): VaultLoader {
         notify(message, { label: '再試行', onClick: () => void load() });
         return;
       }
-      await loadNoteIndexQuietly({ owner, name }, setNoteIndex, setIndexError, notify);
+      try {
+        const index = await run(loadNoteIndex({ owner, name }));
+        setNoteIndex(index);
+        setIndexError(null);
+      } catch (error) {
+        setIndexError(vaultErrorMessage(error));
+        notify('ノート索引を取得できませんでした。タグ・バックリンクは表示されません。');
+      }
     },
     [owner, name, notify, onSessionExpired],
   );
@@ -117,41 +131,4 @@ export function useVaultLoader(args: UseVaultLoaderArgs): VaultLoader {
     noteIndexUpdated,
     setSyncProgress: setSyncProgressState,
   };
-}
-
-/** 初期同期を実行する。セッション失効時は true を返す（後続処理を中止） */
-async function runInitialSync(
-  ref: { owner: string; name: string },
-  setSyncProgress: (progress: SyncProgress | null) => void,
-  notify: (message: string) => void,
-  onSessionExpired: () => void,
-): Promise<boolean> {
-  try {
-    await run(initializeVault(ref, setSyncProgress));
-  } catch (error) {
-    if (isSessionExpiredError(error)) {
-      notify('セッションの有効期限が切れました。ログインし直してください。');
-      onSessionExpired();
-      return true;
-    }
-    notify(vaultErrorMessage(error));
-  }
-  return false;
-}
-
-/** 共有索引を展開する。失敗しても画面は壊さない（タグ・バックリンクが消えるだけ） */
-async function loadNoteIndexQuietly(
-  ref: { owner: string; name: string },
-  setNoteIndex: (index: NoteIndex | null) => void,
-  setIndexError: (message: string | null) => void,
-  notify: (message: string) => void,
-): Promise<void> {
-  try {
-    const index = await run(loadNoteIndex(ref));
-    setNoteIndex(index);
-    setIndexError(null);
-  } catch (error) {
-    setIndexError(vaultErrorMessage(error));
-    notify('ノート索引を取得できませんでした。タグ・バックリンクは表示されません。');
-  }
 }

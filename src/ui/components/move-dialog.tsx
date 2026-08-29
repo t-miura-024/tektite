@@ -19,15 +19,6 @@ export type MoveDialogProps = {
   onConfirm: (targetDirectory: string) => void;
 };
 
-/** ディレクトリパスを深さ優先の表示名にする（ルートは「Vault ルート」） */
-function displayName(directory: string): string {
-  if (directory === '') {
-    return '（Vault ルート）';
-  }
-  const segments = directory.split('/');
-  return `${'　'.repeat(Math.max(segments.length - 1, 0))}${segments[segments.length - 1] ?? ''}/`;
-}
-
 export function MoveDialog({
   targetLabel,
   directories,
@@ -51,6 +42,11 @@ export function MoveDialog({
           {list.map((directory) => {
             const isBlocked = blocked.has(directory);
             const isSelected = safeSelected === directory;
+            const segments = directory.split('/');
+            const label =
+              directory === ''
+                ? '（Vault ルート）'
+                : `${'　'.repeat(Math.max(segments.length - 1, 0))}${segments[segments.length - 1] ?? ''}/`;
             return (
               <li key={directory} role="presentation">
                 <button
@@ -62,7 +58,7 @@ export function MoveDialog({
                   className={isSelected ? 'is-selected' : undefined}
                   onClick={() => setSelected(directory)}
                 >
-                  {displayName(directory)}
+                  {label}
                   {isBlocked && (
                     <span className="move-dialog-blocked-note">（選択できません）</span>
                   )}

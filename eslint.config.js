@@ -1,5 +1,6 @@
 // @ts-check
 import tseslint from 'typescript-eslint';
+import localPlugin from './tools/eslint-plugin-local/index.js';
 
 export default tseslint.config(
   {
@@ -33,8 +34,10 @@ export default tseslint.config(
     },
     plugins: {
       '@typescript-eslint': tseslint.plugin,
+      local: localPlugin,
     },
     rules: {
+      'local/no-single-use-private-function': 'error',
       // oxlint でカバー済みの構文ベースルールは eslint 側で off（重複回避）
       'no-console': 'off',
       eqeqeq: 'off',
@@ -148,6 +151,7 @@ export default tseslint.config(
   {
     files: ['**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}', 'features/**/*.ts'],
     rules: {
+      'local/no-single-use-private-function': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off',
