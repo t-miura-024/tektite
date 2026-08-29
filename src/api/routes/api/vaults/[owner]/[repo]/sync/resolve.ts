@@ -40,29 +40,6 @@ function paramToString(value: string | string[] | undefined): string {
   return value ?? '';
 }
 
-/** ボディから path と resolution を読む（形式不正は null） */
-async function readRequestBody(
-  request: Request,
-): Promise<{ path: string; resolution: 'overwrite' | 'adopt' } | null> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return null;
-  }
-  if (typeof body !== 'object' || body === null || !('path' in body) || !('resolution' in body)) {
-    return null;
-  }
-  const { path, resolution } = body;
-  if (typeof path !== 'string' || path.length === 0) {
-    return null;
-  }
-  if (resolution !== 'overwrite' && resolution !== 'adopt') {
-    return null;
-  }
-  return { path, resolution };
-}
-
 export async function handleVaultSyncResolvePost(context: RouteContext): Promise<Response> {
   const { env, request, params } = context;
   const owner = paramToString(params.owner);
@@ -103,11 +80,36 @@ export async function handleVaultSyncResolvePost(context: RouteContext): Promise
     return Response.json({ error: 'not_synced' }, { status: 409 });
   }
 
-  const parsed = await readRequestBody(request);
-  if (parsed === null) {
-    return Response.json({ error: 'invalid_body' }, { status: 400 });
+  let _parsedPath: string;
+  let _parsedResolution: 'overwrite' | 'adopt';
+  {
+    let _body: unknown;
+    try {
+      _body = await request.json();
+    } catch {
+      return Response.json({ error: 'invalid_body' }, { status: 400 });
+    }
+    if (
+      typeof _body !== 'object' ||
+      _body === null ||
+      !('path' in _body) ||
+      !('resolution' in _body)
+    ) {
+      return Response.json({ error: 'invalid_body' }, { status: 400 });
+    }
+    const _path = _body.path;
+    if (typeof _path !== 'string' || _path.length === 0) {
+      return Response.json({ error: 'invalid_body' }, { status: 400 });
+    }
+    const _resolution = _body.resolution;
+    if (_resolution !== 'overwrite' && _resolution !== 'adopt') {
+      return Response.json({ error: 'invalid_body' }, { status: 400 });
+    }
+    _parsedPath = _path;
+    _parsedResolution = _resolution;
   }
-  const { path, resolution } = parsed;
+  const path = _parsedPath;
+  const resolution = _parsedResolution;
 
   const outcome = await resolveSyncConflict(
     config.apiBaseUrl,

@@ -46,7 +46,7 @@ export async function resolveSyncConflict(
 ): Promise<ResolveConflictOutcome> {
   const meta = await readVaultMeta(bucket, owner, repoName);
   if (meta === null) {
-    return { ok: false, response: notSyncedResponse() };
+    return { ok: false, response: Response.json({ error: 'not_synced' }, { status: 409 }) };
   }
   const cached = await readCachedNote(bucket, owner, repoName, path);
   if (cached === null) {
@@ -59,19 +59,61 @@ export async function resolveSyncConflict(
   }
   const ghSha = treeResult.ghMap.get(path) ?? null;
 
-  const resolved =
-    resolution === 'adopt'
-      ? await adoptLocalContent({
-          baseUrl,
-          token,
-          bucket,
-          owner,
-          repoName,
+  let resolved: ResolveConflictOutcome | null = null;
+  if (resolution === 'adopt') {
+    const result = await commitChangesToGitHub(
+      baseUrl,
+      token,
+      owner,
+      repoName,
+      [
+        {
+          op: ghSha === null ? 'create' : 'update',
           path,
-          content: cached.content,
-          ghSha,
-        })
-      : await overwriteWithRemote({ baseUrl, token, bucket, owner, repoName, path, ghSha });
+          to: null,
+          content: encodeBase64Content(cached.content),
+        },
+      ],
+      `Resolve sync conflict: ${path}`,
+    );
+    if (!result.ok) {
+      resolved = { ok: false, response: result.response };
+    }
+    if (result.ok) {
+      const blobSha = await gitBlobShaHex(new TextEncoder().encode(cached.content));
+      await writeCachedNote(bucket, owner, repoName, path, {
+        sha: blobSha,
+        content: cached.content,
+      });
+      resolved = { ok: true, sha: blobSha };
+    }
+  }
+  if (resolution !== 'adopt') {
+    if (ghSha === null) {
+      await deleteCachedNote(bucket, owner, repoName, path);
+      await applyVaultTreeChanges(bucket, owner, repoName, [{ op: 'remove', path }]);
+      resolved = { ok: true, sha: '' };
+    }
+    if (ghSha !== null) {
+      const remote = await fetchBlobContent(baseUrl, token, owner, repoName, ghSha);
+      if (remote === null) {
+        resolved = {
+          ok: false,
+          response: Response.json({ error: 'github_error' }, { status: 502 }),
+        };
+      }
+      if (remote !== null) {
+        await writeCachedNote(bucket, owner, repoName, path, {
+          sha: ghSha,
+          content: remote,
+        });
+        resolved = { ok: true, sha: ghSha };
+      }
+    }
+  }
+  if (resolved === null) {
+    return { ok: false, response: Response.json({ error: 'github_error' }, { status: 502 }) };
+  }
   if (!resolved.ok) {
     return resolved;
   }
@@ -87,90 +129,4 @@ export async function resolveSyncConflict(
     });
   }
   return { ok: true, sha: resolved.sha };
-}
-
-function notSyncedResponse(): Response {
-  return Response.json({ error: 'not_synced' }, { status: 409 });
-}
-
-type AdoptInput = {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly bucket: R2Bucket;
-  readonly owner: string;
-  readonly repoName: string;
-  readonly path: string;
-  /** R2 側（ローカル保存）の本文 */
-  readonly content: string;
-  /** GitHub 側の blob sha（GitHub 側で削除された場合は null → create になる） */
-  readonly ghSha: string | null;
-};
-
-/** adopt（ローカル側を採用）: ローカル内容を GitHub へ反映し、R2 の sha を揃える */
-async function adoptLocalContent(input: AdoptInput): Promise<ResolveConflictOutcome> {
-  // 削除・作成・更新のどれでも update/create になる
-  const result = await commitChangesToGitHub(
-    input.baseUrl,
-    input.token,
-    input.owner,
-    input.repoName,
-    [
-      {
-        op: input.ghSha === null ? 'create' : 'update',
-        path: input.path,
-        to: null,
-        content: encodeBase64Content(input.content),
-      },
-    ],
-    `Resolve sync conflict: ${input.path}`,
-  );
-  if (!result.ok) {
-    return { ok: false, response: result.response };
-  }
-  // GitHub の blob sha（= ローカル内容の git blob sha）に揃えると、次回の同期
-  // で「同一」と判定され、衝突が再検出されない
-  const blobSha = await gitBlobShaHex(new TextEncoder().encode(input.content));
-  await writeCachedNote(input.bucket, input.owner, input.repoName, input.path, {
-    sha: blobSha,
-    content: input.content,
-  });
-  return { ok: true, sha: blobSha };
-}
-
-type OverwriteInput = {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly bucket: R2Bucket;
-  readonly owner: string;
-  readonly repoName: string;
-  readonly path: string;
-  readonly ghSha: string | null;
-};
-
-/** overwrite（GitHub 側を採用）: R2 を GitHub の現在内容で更新する（削除なら R2 から消す） */
-async function overwriteWithRemote(input: OverwriteInput): Promise<ResolveConflictOutcome> {
-  if (input.ghSha === null) {
-    // GitHub 側で削除されたノート → R2 からも削除する
-    await deleteCachedNote(input.bucket, input.owner, input.repoName, input.path);
-    await applyVaultTreeChanges(input.bucket, input.owner, input.repoName, [
-      { op: 'remove', path: input.path },
-    ]);
-    return { ok: true, sha: '' };
-  }
-  // GitHub 側の内容を R2 へ反映する
-  const remote = await fetchBlobContent(
-    input.baseUrl,
-    input.token,
-    input.owner,
-    input.repoName,
-    input.ghSha,
-  );
-  if (remote === null) {
-    return { ok: false, response: Response.json({ error: 'github_error' }, { status: 502 }) };
-  }
-  await writeCachedNote(input.bucket, input.owner, input.repoName, input.path, {
-    sha: input.ghSha,
-    content: remote,
-  });
-  return { ok: true, sha: input.ghSha };
 }

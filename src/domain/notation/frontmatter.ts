@@ -62,7 +62,54 @@ export function parseFrontmatter(text: string): Frontmatter | null {
   const from = 0;
   const to = (closeLine?.start ?? 0) + 3;
   const raw = text.slice(first.text.length + 1, closeLine?.start ?? 0);
-  return { from, to, raw, fields: parseFrontmatterFields(raw) };
+  const intermediate: { key: string; values: string[] }[] = [];
+  let last: { key: string; values: string[] } | null = null;
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      continue;
+    }
+    if (trimmed.startsWith('-')) {
+      const item = LIST_ITEM_RE.exec(line);
+      if (item && item[3] !== undefined) {
+        const value = parseScalar(item[3]);
+        if (last) {
+          last.values.push(value);
+        }
+      }
+      continue;
+    }
+    if (/^\s/.test(line)) {
+      continue;
+    }
+    const field = FIELD_RE.exec(line);
+    if (!field || field[1] === undefined) {
+      continue;
+    }
+    const rawValue = field[2] ?? '';
+    const listTrimmed = rawValue.trim();
+    let values: string[] = [];
+    if (listTrimmed.startsWith('[') && listTrimmed.endsWith(']')) {
+      values = listTrimmed
+        .slice(1, -1)
+        .split(',')
+        .map((item) => parseScalar(item))
+        .filter((item) => item !== '');
+    }
+    const value = values.length > 0 ? values.join(', ') : parseScalar(rawValue);
+    const next: { key: string; values: string[] } = {
+      key: field[1],
+      values: values.length > 0 ? values : rawValue.trim() === '' ? [] : [value],
+    };
+    intermediate.push(next);
+    last = next;
+  }
+  const fields = intermediate.map((field) => ({
+    key: field.key,
+    value: field.values.join(', '),
+    values: field.values,
+  }));
+  return { from, to, raw, fields };
 }
 
 /** YAML のスカラー値を正規化する（クォート除去・末尾コメント除去） */
@@ -80,64 +127,6 @@ function parseScalar(raw: string): string {
   // クォートされていない値の末尾コメント（` #...`）を除去する
   const spaceHash = trimmed.indexOf(' #');
   return (spaceHash === -1 ? trimmed : trimmed.slice(0, spaceHash)).trim();
-}
-
-/** フロントマテリア本文（raw）からトップレベルフィールドを抽出する */
-function parseFrontmatterFields(raw: string): FrontmatterField[] {
-  const fields: { key: string; values: string[] }[] = [];
-  let last: { key: string; values: string[] } | null = null;
-
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed === '' || trimmed.startsWith('#')) {
-      continue;
-    }
-    if (trimmed.startsWith('-')) {
-      const item = LIST_ITEM_RE.exec(line);
-      if (item && item[3] !== undefined) {
-        const value = parseScalar(item[3]);
-        if (last) {
-          last.values.push(value);
-        }
-      }
-      continue;
-    }
-    if (/^\s/.test(line)) {
-      // インデントされた行はトップレベルではない（ネストした構造の一部として無視）
-      continue;
-    }
-    const field = FIELD_RE.exec(line);
-    if (!field || field[1] === undefined) {
-      continue;
-    }
-    const values = parseListValue(field[2] ?? '');
-    const value = values.length > 0 ? values.join(', ') : parseScalar(field[2] ?? '');
-    const next: { key: string; values: string[] } = {
-      key: field[1],
-      values: values.length > 0 ? values : (field[2] ?? '').trim() === '' ? [] : [value],
-    };
-    fields.push(next);
-    last = next;
-  }
-
-  return fields.map((field) => ({
-    key: field.key,
-    value: field.values.join(', '),
-    values: field.values,
-  }));
-}
-
-/** インライン配列 `[a, b]` を分解する。配列でなければ空配列 */
-function parseListValue(raw: string): string[] {
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
-    return [];
-  }
-  return trimmed
-    .slice(1, -1)
-    .split(',')
-    .map((item) => parseScalar(item))
-    .filter((item) => item !== '');
 }
 
 /** frontmatter フィールドから `tags:` キー（大文字小文字を区別しない）のタグを抽出する */

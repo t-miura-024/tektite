@@ -32,9 +32,6 @@ export type CommitToGithubResult =
   | { readonly ok: true; readonly branch: string; readonly commitSha: string }
   | { readonly ok: false; readonly response: Response };
 
-/** ステップの共通失敗形（CommitToGithubResult の失敗側と同じ構造） */
-type StepError = { readonly ok: false; readonly response: Response };
-
 /**
  * 変更列を単一コミットとして GitHub のデフォルトブランチへ適用する。
  * move は base tree の blob sha を再利用（本文転送なし）、同一パスの後続変更が
@@ -78,158 +75,82 @@ export async function commitChangesToGitHub(
   }
 
   // 新 tree を作成する（base_tree を継承。空リポジトリの初回コミットは省略）
-  const treeSha = await createTree(
-    base,
-    token,
-    owner,
-    repoName,
-    state.state.baseTreeSha,
-    built.delta,
-  );
-  if (!treeSha.ok) {
-    return treeSha;
-  }
-  // コミットを作成する（空リポジトリの初回コミットは parents 無し）
-  const commit = await createCommit(
-    base,
-    token,
-    owner,
-    repoName,
-    message,
-    treeSha.sha,
-    state.state.headCommitSha,
-  );
-  if (!commit.ok) {
-    return commit;
-  }
-  return updateBranchRef(base, token, owner, repoName, repo.branch, commit.sha);
-}
-
-/** 新 tree を作成し、tree sha を返す */
-async function createTree(
-  base: string,
-  token: string,
-  owner: string,
-  repoName: string,
-  baseTreeSha: string | null,
-  delta: ReadonlyMap<string, DeltaEntry>,
-): Promise<{ ok: true; sha: string } | StepError> {
-  const fetched = await fetchApi(base, `/repos/${owner}/${repoName}/git/trees`, token, {
+  const treeFetched = await fetchApi(base, `/repos/${owner}/${repoName}/git/trees`, token, {
     method: 'POST',
     body: JSON.stringify(
-      baseTreeSha === null
-        ? { tree: [...delta.values()] }
-        : { base_tree: baseTreeSha, tree: [...delta.values()] },
+      state.state.baseTreeSha === null
+        ? { tree: [...built.delta.values()] }
+        : { base_tree: state.state.baseTreeSha, tree: [...built.delta.values()] },
     ),
   });
-  if (!fetched.ok) {
-    return fetched;
+  if (!treeFetched.ok) {
+    return treeFetched;
   }
-  const failure = mapGithubFailure(fetched.response);
-  if (failure) {
-    return { ok: false, response: failure };
+  const treeFailure = mapGithubFailure(treeFetched.response);
+  if (treeFailure) {
+    return { ok: false, response: treeFailure };
   }
-  const sha = readNonEmptyStringField(await readJsonBody(fetched.response), 'sha');
-  if (sha === null) {
+  const treeSha = readNonEmptyStringField(await readJsonBody(treeFetched.response), 'sha');
+  if (treeSha === null) {
     return { ok: false, response: githubErrorResponse() };
   }
-  return { ok: true, sha };
-}
-
-/** コミットを作成し、commit sha を返す */
-async function createCommit(
-  base: string,
-  token: string,
-  owner: string,
-  repoName: string,
-  message: string,
-  treeSha: string,
-  headCommitSha: string | null,
-): Promise<{ ok: true; sha: string } | StepError> {
-  const fetched = await fetchApi(base, `/repos/${owner}/${repoName}/git/commits`, token, {
+  // コミットを作成する（空リポジトリの初回コミットは parents 無し）
+  const commitFetched = await fetchApi(base, `/repos/${owner}/${repoName}/git/commits`, token, {
     method: 'POST',
     body: JSON.stringify({
       message,
       tree: treeSha,
-      parents: headCommitSha === null ? [] : [headCommitSha],
+      parents: state.state.headCommitSha === null ? [] : [state.state.headCommitSha],
     }),
   });
-  if (!fetched.ok) {
-    return fetched;
+  if (!commitFetched.ok) {
+    return commitFetched;
   }
-  const failure = mapGithubFailure(fetched.response);
-  if (failure) {
-    return { ok: false, response: failure };
+  const commitFailure = mapGithubFailure(commitFetched.response);
+  if (commitFailure) {
+    return { ok: false, response: commitFailure };
   }
-  const sha = readNonEmptyStringField(await readJsonBody(fetched.response), 'sha');
-  if (sha === null) {
+  const commitSha = readNonEmptyStringField(await readJsonBody(commitFetched.response), 'sha');
+  if (commitSha === null) {
     return { ok: false, response: githubErrorResponse() };
   }
-  return { ok: true, sha };
-}
-
-/**
- * ブランチ参照を更新する（force: false。409 は楽観ロック競合として伝える）。
- * 空リポジトリの初回コミットは PATCH が 404（ref 未作成）になるため、
- * POST /git/refs で新規作成する。
- */
-async function updateBranchRef(
-  base: string,
-  token: string,
-  owner: string,
-  repoName: string,
-  branch: string,
-  commitSha: string,
-): Promise<CommitToGithubResult> {
-  const fetched = await fetchApi(
+  const refFetched = await fetchApi(
     base,
-    `/repos/${owner}/${repoName}/git/refs/heads/${encodeURIComponent(branch)}`,
+    `/repos/${owner}/${repoName}/git/refs/heads/${encodeURIComponent(repo.branch)}`,
     token,
     {
       method: 'PATCH',
       body: JSON.stringify({ sha: commitSha, force: false }),
     },
   );
-  if (!fetched.ok) {
-    return fetched;
+  if (!refFetched.ok) {
+    return refFetched;
   }
-  if (fetched.response.status === 409) {
+  if (refFetched.response.status === 409) {
     return { ok: false, response: conflictResponse() };
   }
-  if (fetched.response.status === 404) {
-    return createFirstBranchRef(base, token, owner, repoName, branch, commitSha);
+  if (refFetched.response.status === 404) {
+    const firstRefFetched = await fetchApi(base, `/repos/${owner}/${repoName}/git/refs`, token, {
+      method: 'POST',
+      body: JSON.stringify({ ref: `refs/heads/${repo.branch}`, sha: commitSha }),
+    });
+    if (!firstRefFetched.ok) {
+      return firstRefFetched;
+    }
+    if (firstRefFetched.response.status === 409) {
+      return { ok: false, response: conflictResponse() };
+    }
+    const firstFailure = mapGithubFailure(firstRefFetched.response);
+    if (firstFailure) {
+      return { ok: false, response: firstFailure };
+    }
+    return { ok: true, branch: repo.branch, commitSha };
   }
-  const failure = mapGithubFailure(fetched.response);
-  if (failure) {
-    return { ok: false, response: failure };
+  const refFailure = mapGithubFailure(refFetched.response);
+  if (refFailure) {
+    return { ok: false, response: refFailure };
   }
-  return { ok: true, branch, commitSha };
-}
-
-/** 空リポジトリの初回コミット用にブランチ参照を新規作成する */
-async function createFirstBranchRef(
-  base: string,
-  token: string,
-  owner: string,
-  repoName: string,
-  branch: string,
-  commitSha: string,
-): Promise<CommitToGithubResult> {
-  const fetched = await fetchApi(base, `/repos/${owner}/${repoName}/git/refs`, token, {
-    method: 'POST',
-    body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitSha }),
-  });
-  if (!fetched.ok) {
-    return fetched;
-  }
-  if (fetched.response.status === 409) {
-    return { ok: false, response: conflictResponse() };
-  }
-  const failure = mapGithubFailure(fetched.response);
-  if (failure) {
-    return { ok: false, response: failure };
-  }
-  return { ok: true, branch, commitSha };
+  return { ok: true, branch: repo.branch, commitSha };
 }
 
 const conflictResponse = (): Response => Response.json({ error: 'conflict' }, { status: 409 });

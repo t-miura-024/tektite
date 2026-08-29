@@ -56,8 +56,25 @@ export function usePaneEvents(
    * 失敗はトースト通知して null を返す（エディタは本文を変更しない）。
    */
   const handleUploadImage = useCallback(
-    async (file: File): Promise<string | null> =>
-      uploadAndNotify(file, { owner, name }, notify, onSessionExpired, props.onFileChanged),
+    async (file: File): Promise<string | null> => {
+      try {
+        const base64 = await fileToBase64(file);
+        const result = await run(
+          uploadImage({ owner, name }, { fileName: imageFileName(file), base64 }),
+        );
+        notify('画像をアップロードしました。');
+        props.onFileChanged?.();
+        return result.path;
+      } catch (error) {
+        if (isSessionExpiredError(error)) {
+          notify('セッションの有効期限が切れました。ログインし直してください。');
+          onSessionExpired();
+          return null;
+        }
+        notify(fileErrorMessage(error));
+        return null;
+      }
+    },
     [owner, name, notify, onSessionExpired, props],
   );
 
@@ -83,7 +100,15 @@ export function usePaneEvents(
       return;
     }
     const slug = decodeURIComponent(hash.slice(1));
-    const line = headingLineForSlug(contentRef.current, slug);
+    const lines = contentRef.current.split('\n');
+    let line: number | null = null;
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = /^#{1,6}\s+(.+)$/.exec(lines[index] ?? '');
+      if (match && slugify((match[1] ?? '').trim()) === slug) {
+        line = index + 1;
+        break;
+      }
+    }
     if (line !== null) {
       handleRef.current?.scrollToLine(line);
     }
@@ -116,44 +141,4 @@ function useHeadingScrollEffect(notePath: string, scrollToHash: () => void): voi
       window.removeEventListener(NAVIGATE_EVENT_NAME, scrollToHash);
     };
   }, [notePath, scrollToHash]);
-}
-
-/** File を base64 変換して `attachments/` へ保存し、結果をトーストへ反映する */
-async function uploadAndNotify(
-  file: File,
-  ref: { owner: string; name: string },
-  notify: (message: string) => void,
-  onSessionExpired: () => void,
-  onFileChanged?: () => void,
-): Promise<string | null> {
-  try {
-    const base64 = await fileToBase64(file);
-    const result = await run(uploadImage(ref, { fileName: imageFileName(file), base64 }));
-    notify('画像をアップロードしました。');
-    onFileChanged?.();
-    return result.path;
-  } catch (error) {
-    if (isSessionExpiredError(error)) {
-      notify('セッションの有効期限が切れました。ログインし直してください。');
-      onSessionExpired();
-      return null;
-    }
-    notify(fileErrorMessage(error));
-    return null;
-  }
-}
-
-/**
- * 本文内でスラグが一致する見出しの行番号（1 始まり）を返す。
- * リーディング表示の見出し id（slugify）と一致する規則で照合する。見つからなければ null。
- */
-function headingLineForSlug(content: string, slug: string): number | null {
-  const lines = content.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = /^#{1,6}\s+(.+)$/.exec(lines[index] ?? '');
-    if (match && slugify((match[1] ?? '').trim()) === slug) {
-      return index + 1;
-    }
-  }
-  return null;
 }

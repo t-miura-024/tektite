@@ -6,7 +6,7 @@
  * スキップする。スパンの型定義は parse.ts（記法解析の窓口）に置く。
  */
 
-import type { EmbedSpan, NotationSpan, WikiLinkSpan } from '@/domain/notation/parse';
+import type { NotationSpan } from '@/domain/notation/parse';
 
 /** フェンスドコードの開始: ``` または ~~~（言語指定付きも可） */
 const FENCE_OPEN_RE = /^(`{3,}|~{3,})(.*)$/;
@@ -81,7 +81,15 @@ export function scanBody(text: string, start: number, out: NotationSpan[]): void
     offset = to + 1;
 
     if (fence !== null) {
-      if (isFenceClose(line, fence)) {
+      let run = 0;
+      for (const current of line) {
+        if (current !== fence.char) {
+          break;
+        }
+        run += 1;
+      }
+      const closed = run >= fence.len && line.slice(run).trim() === '';
+      if (closed) {
         fence = null;
       }
       continue;
@@ -91,64 +99,61 @@ export function scanBody(text: string, start: number, out: NotationSpan[]): void
       fence = { char: fenceOpen[1][0] ?? '', len: fenceOpen[1].length };
       continue;
     }
-    scanLine(line, from, out);
-  }
-}
-
-/** 1 行分のインライン走査（WikiLink / Embed / Tag / コードスパン / エスケープ） */
-function scanLine(line: string, base: number, out: NotationSpan[]): void {
-  for (let i = 0; i < line.length;) {
-    const ch = line[i] ?? '';
-    if (ch === '\\') {
-      // エスケープは次の文字ごと読み飛ばす（`\[[` / `\#` を記法にしない）
-      i += 2;
-      continue;
-    }
-    if (ch === '`') {
-      const run = countRun(line, i, '`');
-      const close = line.indexOf('`'.repeat(run), i + run);
-      i = close === -1 ? i + run : close + run;
-      continue;
-    }
-    if (ch === '!' && line[i + 1] === '[' && line[i + 2] === '[') {
-      const next = parseLinkSpan(line, i, base, 'embed', out);
-      if (next !== null) {
-        i = next;
+    for (let i = 0; i < line.length;) {
+      const ch = line[i] ?? '';
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      }
+      if (ch === '`') {
+        const run = line.slice(i).match(/^`+/)?.[0].length ?? 0;
+        const close = line.indexOf('`'.repeat(run), i + run);
+        if (close === -1) {
+          i = i + run;
+          continue;
+        }
+        i = close + run;
+        continue;
+      }
+      if (ch === '!' && line[i + 1] === '[' && line[i + 2] === '[') {
+        const next = parseLinkSpan(line, i, from, 'embed', out);
+        if (next !== null) {
+          i = next;
+          continue;
+        }
+        i += 1;
+        continue;
+      }
+      if (ch === '[' && line[i + 1] === '[') {
+        const next = parseLinkSpan(line, i, from, 'wikilink', out);
+        if (next !== null) {
+          i = next;
+          continue;
+        }
+        i += 1;
+        continue;
+      }
+      if (ch === '#') {
+        const prev = line[i - 1] ?? '';
+        if (/[\p{L}\p{N}_/#-]/u.test(prev)) {
+          i += 1;
+          continue;
+        }
+        const match = TAG_BODY_RE.exec(line.slice(i + 1));
+        const tag = match?.[0] ?? '';
+        if (tag === '' || !/[\p{L}]/u.test(tag)) {
+          i += 1;
+          continue;
+        }
+        const tagFrom = from + i;
+        const tagTo = from + i + 1 + tag.length;
+        out.push({ kind: 'tag', from: tagFrom, to: tagTo, tag });
+        i = i + 1 + tag.length;
         continue;
       }
       i += 1;
-      continue;
     }
-    if (ch === '[' && line[i + 1] === '[') {
-      const next = parseLinkSpan(line, i, base, 'wikilink', out);
-      if (next !== null) {
-        i = next;
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-    if (ch === '#') {
-      const next = parseTagSpan(line, i, base, out);
-      if (next !== null) {
-        i = next;
-        continue;
-      }
-    }
-    i += 1;
   }
-}
-
-/** from 以降に ch が何文字連続するかを数える */
-function countRun(text: string, from: number, ch: string): number {
-  let n = 0;
-  for (const current of text.slice(from)) {
-    if (current !== ch) {
-      break;
-    }
-    n += 1;
-  }
-  return n;
 }
 
 /**
@@ -171,80 +176,29 @@ function parseLinkSpan(
   }
   const parts = parseLinkText(line.slice(innerStart, close));
   if (parts === null) {
-    // 空ターゲット等の不正な `[[...]]` は、内部をタグなどとして誤解析しないよう
-    // 閉じ `]]` までまとめて読み飛ばす
     return close + 2;
   }
   const from = base + lineIndex;
   const to = base + close + 2;
-  const span: NotationSpan =
-    kind === 'embed' ? buildEmbedSpan(from, to, parts) : buildWikiLinkSpan(from, to, parts);
-  out.push(span);
-  return close + 2;
-}
-
-/** Embed スパンを生成する（画像分類を含む） */
-function buildEmbedSpan(from: number, to: number, parts: LinkTextParts): EmbedSpan {
-  return {
-    kind: 'embed',
-    from,
-    to,
-    target: parts.target,
-    alias: parts.alias,
-    subpath: parts.subpath,
-    targetType: isImageTarget(parts.target) ? 'image' : 'note',
-  };
-}
-
-/** WikiLink スパンを生成する */
-function buildWikiLinkSpan(from: number, to: number, parts: LinkTextParts): WikiLinkSpan {
-  return {
+  if (kind === 'embed') {
+    out.push({
+      kind: 'embed',
+      from,
+      to,
+      target: parts.target,
+      alias: parts.alias,
+      subpath: parts.subpath,
+      targetType: isImageTarget(parts.target) ? 'image' : 'note',
+    });
+    return close + 2;
+  }
+  out.push({
     kind: 'wikilink',
     from,
     to,
     target: parts.target,
     alias: parts.alias,
     subpath: parts.subpath,
-  };
-}
-
-/**
- * `#` からタグを解析して TagSpan を追加する。
- * - 直前の文字が英数字・日本語・`_`・`-`・`/`・`#` の場合はタグにしない
- *   （`foo#bar` や `C#` を誤認識しない。Markdown リンクのアンカー
- *   `[x](#sec)` のような稀なケースはタグと誤認しうるが MVP では許容）
- * - 数字のみ（`#123`）や `#` 直後が空白（見出し）のものはタグにしない
- * 戻り値は「次の走査位置」（タグ末尾の直後）。タグでないときは null。
- */
-function parseTagSpan(
-  line: string,
-  lineIndex: number,
-  base: number,
-  out: NotationSpan[],
-): number | null {
-  const prev = line[lineIndex - 1] ?? '';
-  if (/[\p{L}\p{N}_/#-]/u.test(prev)) {
-    return null;
-  }
-  const match = TAG_BODY_RE.exec(line.slice(lineIndex + 1));
-  const tag = match?.[0] ?? '';
-  if (tag === '' || !/[\p{L}]/u.test(tag)) {
-    return null;
-  }
-  const from = base + lineIndex;
-  const to = base + lineIndex + 1 + tag.length;
-  out.push({ kind: 'tag', from, to, tag });
-  return lineIndex + 1 + tag.length;
-}
-
-/** フェンス閉じ行かどうか（同じ char が open の長さ以上続き、残りは空白のみ） */
-function isFenceClose(line: string, fence: { char: string; len: number }): boolean {
-  let run = 0;
-  for (const current of line) {
-    if (current !== fence.char) {
-      break;
-    }
-    run += 1;
-  }
-  return run >= fence.len && line.slice(run).trim() === '';
+  });
+  return close + 2;
 }

@@ -33,20 +33,6 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   oauth_exchange: 'GitHub トークンの取得に失敗しました。時間をおいて再度ログインしてください。',
 };
 
-function consumeOAuthErrorParam(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const errorCode = params.get('error');
-  if (!errorCode) {
-    return null;
-  }
-  params.delete('error');
-  const query = params.toString();
-  window.history.replaceState(null, '', query ? `/?${query}` : '/');
-  return (
-    OAUTH_ERROR_MESSAGES[errorCode] ?? '認証中にエラーが発生しました。ログインし直してください。'
-  );
-}
-
 export function App(): JSX.Element {
   const [toast, setToast] = useState<ToastState | null>(null);
   const notify = useCallback((message: string, action?: ToastAction): void => {
@@ -62,7 +48,17 @@ export function App(): JSX.Element {
 
   // OAuth コールバック後の ?error= をトーストへ出し、初期セッション確認を行う
   useEffect(() => {
-    const oauthError = consumeOAuthErrorParam();
+    const params = new URLSearchParams(window.location.search);
+    const errorCode = params.get('error');
+    let oauthError: string | null = null;
+    if (errorCode) {
+      params.delete('error');
+      const query = params.toString();
+      window.history.replaceState(null, '', query ? `/?${query}` : '/');
+      oauthError =
+        OAUTH_ERROR_MESSAGES[errorCode] ??
+        '認証中にエラーが発生しました。ログインし直してください。';
+    }
     if (oauthError) {
       setToast({ message: oauthError });
     }

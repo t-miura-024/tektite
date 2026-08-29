@@ -13,22 +13,6 @@ type FakeR2Object = {
   readonly metadata?: Record<string, string>;
 };
 
-/** R2ObjectBody 相当（tektite が使う範囲のみ） */
-function fakeR2ObjectBody(object: FakeR2Object): {
-  customMetadata: Record<string, string>;
-  arrayBuffer: () => Promise<ArrayBuffer>;
-  json: () => Promise<unknown>;
-} {
-  return {
-    get customMetadata(): Record<string, string> {
-      return object.metadata ?? {};
-    },
-    arrayBuffer: (): Promise<ArrayBuffer> => Promise.resolve(object.body),
-    json: (): Promise<unknown> =>
-      Promise.resolve(JSON.parse(new TextDecoder().decode(object.body))),
-  };
-}
-
 /**
  * メモリ上の R2 バケットを生成する。
  * 戻り値の実体は使用 API だけを持つオブジェクトで、境界で R2Bucket として返す。
@@ -39,7 +23,18 @@ export function createFakeR2Bucket(): R2Bucket {
   const bucket = {
     get(key: string): Promise<unknown> {
       const object = objects.get(key);
-      return Promise.resolve(object === undefined ? null : fakeR2ObjectBody(object));
+      return Promise.resolve(
+        object === undefined
+          ? null
+          : {
+              get customMetadata(): Record<string, string> {
+                return object.metadata ?? {};
+              },
+              arrayBuffer: (): Promise<ArrayBuffer> => Promise.resolve(object.body),
+              json: (): Promise<unknown> =>
+                Promise.resolve(JSON.parse(new TextDecoder().decode(object.body))),
+            },
+      );
     },
 
     put(

@@ -40,11 +40,6 @@ export async function gitBlobShaHex(content: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** テキスト本文の git blob sha */
-function gitBlobShaText(content: string): Promise<string> {
-  return gitBlobShaHex(new TextEncoder().encode(content));
-}
-
 /** ノートが「ローカル保存由来（SHA-256）」かどうか（保存 → 衝突判定の材料） */
 async function isLocalSavedSha(content: string, sha: string): Promise<boolean> {
   return (await sha256Hex(content)) === sha;
@@ -127,61 +122,48 @@ export async function pullGithubChanges(input: PullInput): Promise<PullResult> {
     if (!isNotePath(path) || ghSha.length === 0) {
       continue;
     }
-    await classifyNoteDifference({
-      bucket: input.bucket,
-      owner: input.owner,
-      repoName: input.repoName,
-      path,
-      ghSha,
-      existingPaths,
-      deletedPaths,
-      treeFileSha,
-      fetchTargets,
-      localConflicts,
-    });
+    if (!existingPaths.has(path)) {
+      // R2 に無いノート。ローカル削除（tombstone）のあるパスは取得しない
+      // （削除の巻き戻り防止。tombstone が無ければ GitHub 側の新規追加）
+      if (!deletedPaths.has(path)) {
+        fetchTargets.push({ path, ghSha });
+      }
+      continue;
+    }
+    // ツリーキャッシュの sha が GitHub と一致していれば前回同期から変更なし
+    const cachedTreeSha = treeFileSha.get(path);
+    if (cachedTreeSha !== null && cachedTreeSha === ghSha) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- 変更のあった既存ノートのみ順に読むため
+    const cached = await readCachedNote(input.bucket, input.owner, input.repoName, path);
+    if (cached === null) {
+      // existingPaths に存在するが破損等で読めない → 取得し直す（防衛線）
+      fetchTargets.push({ path, ghSha });
+      continue;
+    }
+    // 同一判定は sha 文字列比較ではなく本文の git blob sha との照合で行う
+    // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順に同一判定するため
+    if (
+      cached.sha === ghSha ||
+      (await gitBlobShaHex(new TextEncoder().encode(cached.content))) === ghSha
+    ) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順にローカル保存判定するため
+    if (await isLocalSavedSha(cached.content, cached.sha)) {
+      // R2 側にローカル保存（未 push）の変更がある → 同期衝突
+      localConflicts.push({ path, local: cached.content, ghSha });
+      continue;
+    }
+    // R2 は古い GitHub 内容（未編集）→ GitHub 側の変更を取り込む
+    fetchTargets.push({ path, ghSha });
   }
 
   // blob 取得（外部 fetch）。衝突の remote 内容取得分を差し引いたバジェットで
   // 取得し、残りは次回の再実行で消化する
   const fetchBudget = Math.max(0, SYNC_FETCH_LIMIT - localConflicts.length);
   const fetchChunk = fetchTargets.slice(0, fetchBudget);
-  const pulled = await fetchAndApplyChunks(input, fetchChunk);
-
-  // 衝突の remote 内容を取得して conflicts に格納する（fetch バジェットの残り。
-  // 件数は通常ごく少数で、大量衝突は異常時として許容する）
-  for (const conflict of localConflicts) {
-    // oxlint-disable-next-line no-await-in-loop -- 衝突 remote の順次取得のため
-    const remote = await fetchBlobContent(
-      input.baseUrl,
-      input.token,
-      input.owner,
-      input.repoName,
-      conflict.ghSha,
-    );
-    conflicts.push({
-      path: conflict.path,
-      local: conflict.local,
-      remote: remote ?? '',
-      remoteSha: conflict.ghSha,
-    });
-  }
-
-  // GitHub 側で削除されたノートを R2 から削除する。
-  // ローカル保存（未 push）のノートは削除せず衝突として残す
-  const removed = await deleteRemovedNotes(input, conflicts);
-
-  return {
-    pulled: pulled + removed,
-    remaining: fetchTargets.length - fetchChunk.length,
-    conflicts,
-  };
-}
-
-/** 取得チャンクを並列 fetch し、取得できたノートを R2 へ書き込む（反映数を返す） */
-async function fetchAndApplyChunks(
-  input: PullInput,
-  fetchChunk: readonly { readonly path: string; readonly ghSha: string }[],
-): Promise<number> {
   let pulled = 0;
   for (let offset = 0; offset < fetchChunk.length; offset += BLOB_FETCH_CONCURRENCY) {
     const chunk = fetchChunk.slice(offset, offset + BLOB_FETCH_CONCURRENCY);
@@ -211,84 +193,55 @@ async function fetchAndApplyChunks(
       pulled += 1;
     }
   }
-  return pulled;
-}
 
-type ClassifyContext = {
-  readonly bucket: R2Bucket;
-  readonly owner: string;
-  readonly repoName: string;
-  readonly path: string;
-  readonly ghSha: string;
-  readonly existingPaths: ReadonlySet<string>;
-  readonly deletedPaths: ReadonlySet<string>;
-  readonly treeFileSha: ReadonlyMap<string, string | null>;
-  readonly fetchTargets: { path: string; ghSha: string }[];
-  readonly localConflicts: { path: string; local: string; ghSha: string }[];
-};
+  // 衝突の remote 内容を取得して conflicts に格納する（fetch バジェットの残り。
+  // 件数は通常ごく少数で、大量衝突は異常時として許容する）
+  for (const conflict of localConflicts) {
+    // oxlint-disable-next-line no-await-in-loop -- 衝突 remote の順次取得のため
+    const remote = await fetchBlobContent(
+      input.baseUrl,
+      input.token,
+      input.owner,
+      input.repoName,
+      conflict.ghSha,
+    );
+    conflicts.push({
+      path: conflict.path,
+      local: conflict.local,
+      remote: remote ?? '',
+      remoteSha: conflict.ghSha,
+    });
+  }
 
-/** 差分を分類する（外部 fetch なし。R2 の読み取りのみ） */
-async function classifyNoteDifference(context: ClassifyContext): Promise<void> {
-  const { path, ghSha } = context;
-  if (!context.existingPaths.has(path)) {
-    // R2 に無いノート。ローカル削除（tombstone）のあるパスは取得しない
-    // （削除の巻き戻り防止。tombstone が無ければ GitHub 側の新規追加）
-    if (!context.deletedPaths.has(path)) {
-      context.fetchTargets.push({ path, ghSha });
+  // GitHub 側で削除されたノートを R2 から削除する。
+  // ローカル保存（未 push）のノートは削除せず衝突として残す
+  {
+    const cachedTree = await readVaultTree(input.bucket, input.owner, input.repoName);
+    if (cachedTree !== null) {
+      for (const entry of cachedTree.entries) {
+        if (entry.type !== 'file' || !isNotePath(entry.path) || input.ghMap.has(entry.path)) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- ノートの存在確認（順次適用の意図）のため
+        const cached = await readCachedNote(input.bucket, input.owner, input.repoName, entry.path);
+        if (cached === null) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- ローカル保存判定（順次適用の意図）のため
+        if (await isLocalSavedSha(cached.content, cached.sha)) {
+          conflicts.push({ path: entry.path, local: cached.content, remote: '', remoteSha: null });
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
+        await deleteCachedNote(input.bucket, input.owner, input.repoName, entry.path);
+        pulled += 1;
+      }
     }
-    return;
   }
-  // ツリーキャッシュの sha が GitHub と一致していれば前回同期から変更なし
-  const cachedTreeSha = context.treeFileSha.get(path);
-  if (cachedTreeSha !== null && cachedTreeSha === ghSha) {
-    return;
-  }
-  // oxlint-disable-next-line no-await-in-loop -- 変更のあった既存ノートのみ順に読むため
-  const cached = await readCachedNote(context.bucket, context.owner, context.repoName, path);
-  if (cached === null) {
-    // existingPaths に存在するが破損等で読めない → 取得し直す（防衛線）
-    context.fetchTargets.push({ path, ghSha });
-    return;
-  }
-  // 同一判定は sha 文字列比較ではなく本文の git blob sha との照合で行う
-  // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順に同一判定するため
-  if (cached.sha === ghSha || (await gitBlobShaText(cached.content)) === ghSha) {
-    return;
-  }
-  // oxlint-disable-next-line no-await-in-loop -- 既存ノートを順にローカル保存判定するため
-  if (await isLocalSavedSha(cached.content, cached.sha)) {
-    // R2 側にローカル保存（未 push）の変更がある → 同期衝突
-    context.localConflicts.push({ path, local: cached.content, ghSha });
-    return;
-  }
-  // R2 は古い GitHub 内容（未編集）→ GitHub 側の変更を取り込む
-  context.fetchTargets.push({ path, ghSha });
-}
 
-/** GitHub ツリーから消えたノートの後処理（削除 or 衝突化）を行う */
-async function deleteRemovedNotes(input: PullInput, conflicts: SyncConflict[]): Promise<number> {
-  const cachedTree = await readVaultTree(input.bucket, input.owner, input.repoName);
-  if (cachedTree === null) {
-    return 0;
-  }
-  let removed = 0;
-  for (const entry of cachedTree.entries) {
-    if (entry.type !== 'file' || !isNotePath(entry.path) || input.ghMap.has(entry.path)) {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- ノートの存在確認（順次適用の意図）のため
-    const cached = await readCachedNote(input.bucket, input.owner, input.repoName, entry.path);
-    if (cached === null) {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- ローカル保存判定（順次適用の意図）のため
-    if (await isLocalSavedSha(cached.content, cached.sha)) {
-      conflicts.push({ path: entry.path, local: cached.content, remote: '', remoteSha: null });
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- R2 削除（順次適用の意図）のため
-    await deleteCachedNote(input.bucket, input.owner, input.repoName, entry.path);
-    removed += 1;
-  }
-  return removed;
+  return {
+    pulled,
+    remaining: fetchTargets.length - fetchChunk.length,
+    conflicts,
+  };
 }

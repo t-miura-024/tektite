@@ -14,11 +14,6 @@ import { FILE_OPERATION_MESSAGES } from '@/ui/screens/vault-screen/screen-utils'
 import type { ToastAction } from '@/ui/toast';
 import { isSessionExpiredError } from '@/ui/vault-error';
 
-/** 未確定ノート破棄時の遷移先（Vault ルート）へ戻す */
-function backToVaultRoot(owner: string, name: string): void {
-  navigate(vaultRoutePath({ owner, name }));
-}
-
 export type VaultFileOperations = {
   /** 未確定（未コミット）の新規ノートパス（null はなし） */
   pendingNotePath: string | null;
@@ -63,7 +58,15 @@ function useRunFileOperations(args: UseVaultFileOperationsArgs): RunFileOperatio
         notify(message);
         // ツリー + 共有索引を再読込する（索引はユースケースが更新済みのため再取得されない）
         await load();
-        navigateFor(operation, notePath, result.movedPaths, result.removedPaths, owner, name);
+        if (notePath !== null && operation.kind !== 'create-note') {
+          const moved = result.movedPaths.find((move) => move.from === notePath);
+          if (moved !== undefined) {
+            navigate(noteRoutePath({ owner, name }, moved.to));
+          }
+          if (moved === undefined && result.removedPaths.includes(notePath)) {
+            navigate(vaultRoutePath({ owner, name }));
+          }
+        }
         return true;
       } catch (error) {
         if (isSessionExpiredError(error)) {
@@ -101,8 +104,23 @@ function usePendingNoteOperations(args: UseVaultFileOperationsArgs): PendingNote
     setPendingNotePath(null);
   }, [owner, name]);
   const nextDuplicatePath = useCallback(
-    (path: string, type: 'file' | 'directory'): string =>
-      nextAvailableCopyName(path, type, filePaths),
+    (path: string, type: 'file' | 'directory'): string => {
+      const directory = parentDirectoryPath(path);
+      const base = pathBaseName(path);
+      const dot = base.lastIndexOf('.');
+      const stem = type === 'file' && dot > 0 ? base.slice(0, dot) : base;
+      const ext = type === 'file' && dot > 0 ? base.slice(dot) : '';
+      const existing = new Set(filePaths.map((p) => p.toLowerCase()));
+      let candidate = `${stem} copy${ext}`;
+      for (
+        let index = 1;
+        existing.has(joinDirectoryPath(directory, candidate).toLowerCase());
+        index += 1
+      ) {
+        candidate = `${stem} copy ${index}${ext}`;
+      }
+      return joinDirectoryPath(directory, candidate);
+    },
     [filePaths],
   );
   const handleDuplicate = useCallback(
@@ -126,7 +144,16 @@ function usePendingNoteOperations(args: UseVaultFileOperationsArgs): PendingNote
   /** 新規ノートを開始する（Obsidian 式: デフォルト名でエディタを開き、コミットは保留） */
   const startNewNote = useCallback(
     (directory: string): void => {
-      const path = nextUntitledName(directory, filePaths);
+      const existing = new Set(filePaths.map((p) => p.toLowerCase()));
+      let candidate = 'Untitled.md';
+      for (
+        let index = 1;
+        existing.has(joinDirectoryPath(directory, candidate).toLowerCase());
+        index += 1
+      ) {
+        candidate = `Untitled ${index}.md`;
+      }
+      const path = joinDirectoryPath(directory, candidate);
       setPendingNotePath(path);
       navigate(noteRoutePath({ owner, name }, path));
     },
@@ -159,7 +186,7 @@ function usePendingNoteOperations(args: UseVaultFileOperationsArgs): PendingNote
 
   const discardPendingNote = useCallback((): void => {
     setPendingNotePath(null);
-    backToVaultRoot(owner, name);
+    navigate(vaultRoutePath({ owner, name }));
   }, [owner, name]);
 
   return {
@@ -176,63 +203,4 @@ export function useVaultFileOperations(args: UseVaultFileOperationsArgs): VaultF
     ...useRunFileOperations(args),
     ...usePendingNoteOperations(args),
   };
-}
-
-/** 操作後の遷移: 移動・リネーム → 新パス / 削除 → Vault ルート（create-note は除く） */
-function navigateFor(
-  operation: FileOperation,
-  notePath: string | null,
-  movedPaths: readonly { readonly from: string; readonly to: string }[],
-  removedPaths: readonly string[],
-  owner: string,
-  name: string,
-): void {
-  if (notePath === null || operation.kind === 'create-note') {
-    return;
-  }
-  const moved = movedPaths.find((move) => move.from === notePath);
-  if (moved !== undefined) {
-    navigate(noteRoutePath({ owner, name }, moved.to));
-    return;
-  }
-  if (removedPaths.includes(notePath)) {
-    navigate(vaultRoutePath({ owner, name }));
-  }
-}
-
-/** 新規ノートのデフォルト名（Untitled.md / Untitled 1.md …）を衝突しない形で決める */
-function nextUntitledName(directory: string, filePaths: readonly string[]): string {
-  const existing = new Set(filePaths.map((p) => p.toLowerCase()));
-  let candidate = 'Untitled.md';
-  for (
-    let index = 1;
-    existing.has(joinDirectoryPath(directory, candidate).toLowerCase());
-    index += 1
-  ) {
-    candidate = `Untitled ${index}.md`;
-  }
-  return joinDirectoryPath(directory, candidate);
-}
-
-/** Obsidian 式の複製名（`a copy.md` → `a copy 1.md` → …）を衝突しない形で計算する */
-function nextAvailableCopyName(
-  path: string,
-  type: 'file' | 'directory',
-  filePaths: readonly string[],
-): string {
-  const directory = parentDirectoryPath(path);
-  const base = pathBaseName(path);
-  const dot = base.lastIndexOf('.');
-  const stem = type === 'file' && dot > 0 ? base.slice(0, dot) : base;
-  const ext = type === 'file' && dot > 0 ? base.slice(dot) : '';
-  const existing = new Set(filePaths.map((p) => p.toLowerCase()));
-  let candidate = `${stem} copy${ext}`;
-  for (
-    let index = 1;
-    existing.has(joinDirectoryPath(directory, candidate).toLowerCase());
-    index += 1
-  ) {
-    candidate = `${stem} copy ${index}${ext}`;
-  }
-  return joinDirectoryPath(directory, candidate);
 }

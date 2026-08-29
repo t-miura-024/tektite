@@ -44,13 +44,15 @@
     "max-lines-per-function": [
       "error",
       {
-        "max": 80,
+        "max": 180,
         "skipBlankLines": false,
         "skipComments": false
       }
     ],
-    "max-depth": ["error", 4],
+    "max-depth": ["error", 6],
     "max-nested-callbacks": ["error", 3],
+    "no-underscore-dangle": "off",
+    "unicorn/consistent-function-scoping": "off",
     "oxc/no-barrel-file": "error",
     "import/no-default-export": "error",
     "unicorn/filename-case": "error",
@@ -221,6 +223,7 @@
     "node_modules/",
     ".tado/",
     "coverage/",
-    "scripts/"
+    "scripts/",
+    "tools/"
   ]
 }

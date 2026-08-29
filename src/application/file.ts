@@ -67,32 +67,6 @@ export function validateEntryName(name: string, isNote: boolean): string | null 
   return null;
 }
 
-/** 操作のコミットメッセージ（既存の自動生成テンプレートと同系） */
-function commitMessage(operation: FileOperation): string {
-  if (operation.kind === 'create-note') {
-    return `Create ${operation.path}`;
-  }
-  if (operation.kind === 'create-directory') {
-    return `Create directory ${operation.path}/`;
-  }
-  if (operation.kind === 'delete-note') {
-    return `Delete ${operation.path}`;
-  }
-  if (operation.kind === 'delete-directory') {
-    return `Delete directory ${operation.path}/`;
-  }
-  if (operation.kind === 'rename-note') {
-    return `Rename ${operation.from} to ${operation.to}`;
-  }
-  if (operation.kind === 'rename-directory') {
-    return `Rename directory ${operation.from} to ${operation.to}`;
-  }
-  if (operation.kind === 'duplicate-note') {
-    return `Duplicate ${operation.from} to ${operation.to}`;
-  }
-  return `Duplicate directory ${operation.from} to ${operation.to}`;
-}
-
 /**
  * ファイル操作を実行する（単一コミット + 共有索引の反映）。
  * filePaths は操作前の全ファイルパス（UI がツリーから収集したもの）を渡す。
@@ -115,7 +89,31 @@ export const applyFileOperation = (
       return yield* Effect.fail(built.error);
     }
     const { changes, result } = built;
-    const input: CommitChangesInput = { changes, message: commitMessage(operation) };
+    const message = ((): string => {
+      if (operation.kind === 'create-note') {
+        return `Create ${operation.path}`;
+      }
+      if (operation.kind === 'create-directory') {
+        return `Create directory ${operation.path}/`;
+      }
+      if (operation.kind === 'delete-note') {
+        return `Delete ${operation.path}`;
+      }
+      if (operation.kind === 'delete-directory') {
+        return `Delete directory ${operation.path}/`;
+      }
+      if (operation.kind === 'rename-note') {
+        return `Rename ${operation.from} to ${operation.to}`;
+      }
+      if (operation.kind === 'rename-directory') {
+        return `Rename directory ${operation.from} to ${operation.to}`;
+      }
+      if (operation.kind === 'duplicate-note') {
+        return `Duplicate ${operation.from} to ${operation.to}`;
+      }
+      return `Duplicate directory ${operation.from} to ${operation.to}`;
+    })();
+    const input: CommitChangesInput = { changes, message };
     yield* gateway.commitChanges(ref, input);
 
     // 共有索引へ反映（ツリー再読込後の検索・バックリンクが新パスで動くようにする）
@@ -152,11 +150,6 @@ export function imageExtension(fileName: string): string | null {
   }
   const extension = fileName.slice(dot + 1).toLowerCase();
   return IMAGE_EXTENSIONS.has(extension) ? extension : null;
-}
-
-/** 標準 base64（btoa 出力相当）かどうか（コミット API と同じ検証） */
-function isValidBase64(value: string): boolean {
-  return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
 }
 
 /**
@@ -205,7 +198,7 @@ export const uploadImage = (
     if (path === null) {
       return yield* Effect.fail(fileCommitError('server', '画像ファイル名が不正です。'));
     }
-    if (!isValidBase64(input.base64)) {
+    if (!(input.base64.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(input.base64))) {
       return yield* Effect.fail(fileCommitError('server', '画像データが不正です。'));
     }
 

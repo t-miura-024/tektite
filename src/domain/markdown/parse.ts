@@ -77,7 +77,14 @@ export function parseMarkdownDecorations(text: string): MarkdownDecoration[] {
     offset = to + 1;
 
     if (fence !== null) {
-      const closed = isFenceClose(line, fence);
+      let run = 0;
+      for (const current of line) {
+        if (current !== fence.char) {
+          break;
+        }
+        run += 1;
+      }
+      const closed = run >= fence.len && line.slice(run).trim() === '';
       add(out, from, to, closed ? 'code-fence' : 'code-block');
       if (closed) {
         fence = null;
@@ -99,25 +106,54 @@ export function parseMarkdownDecorations(text: string): MarkdownDecoration[] {
 
     const heading = HEADING_RE.exec(line);
     if (heading && heading[1]) {
-      addHeadingDecorations(out, line, heading[1], from);
+      const marker = heading[1];
+      const markerLength = marker.length;
+      add(out, from, from + markerLength, 'heading-marker');
+      const textStart = from + markerLength + 1;
+      add(out, textStart, textStart + line.length - markerLength - 1, 'heading', {
+        level: markerLength,
+      });
+      parseInline(line.slice(markerLength + 1), textStart, out);
       continue;
     }
 
     const task = TASK_RE.exec(line);
     if (task) {
-      addTaskDecorations(out, line, task, from);
+      const indentLen = task[1]?.length ?? 0;
+      const markerLen = task[2]?.length ?? 0;
+      const markerStart = from + indentLen;
+      const checkboxStart = from + line.indexOf('[', indentLen + markerLen);
+      add(out, markerStart, checkboxStart, 'task-marker');
+      add(out, checkboxStart, checkboxStart + TASK_CHECKBOX_LENGTH, 'task-checkbox', {
+        checked: task[3] === 'x' || task[3] === 'X',
+      });
+      const rest = task[4] ?? '';
+      const restStart = from + line.indexOf(rest, indentLen + markerLen + 1);
+      parseInline(line.slice(restStart - from), restStart, out);
       continue;
     }
 
     const list = LIST_RE.exec(line);
     if (list) {
-      addListDecorations(out, line, list, from);
+      const indentLen = list[1]?.length ?? 0;
+      const marker = list[2] ?? '';
+      const markerStart = from + indentLen;
+      add(out, markerStart, markerStart + marker.length + 1, 'list-marker');
+      const rest = list[3] ?? '';
+      const restStart = from + line.indexOf(rest, indentLen + marker.length + 1);
+      parseInline(line.slice(restStart - from), restStart, out);
       continue;
     }
 
     const quote = QUOTE_RE.exec(line);
     if (quote) {
-      addQuoteDecorations(out, quote, from, to);
+      const markerStart = from + (quote[1]?.length ?? 0);
+      add(out, markerStart, markerStart + (quote[2]?.length ?? 0), 'quote-marker');
+      add(out, from, to, 'quote');
+      const rest = quote[3] ?? '';
+      if (rest !== '') {
+        parseInline(rest, to - rest.length, out);
+      }
       continue;
     }
 
@@ -127,75 +163,6 @@ export function parseMarkdownDecorations(text: string): MarkdownDecoration[] {
   }
 
   return out;
-}
-
-/** 見出し行の装飾（マーカー / 見出し本体 / 本文インライン）を追加する */
-function addHeadingDecorations(
-  out: MarkdownDecoration[],
-  line: string,
-  marker: string,
-  from: number,
-): void {
-  const markerLength = marker.length;
-  add(out, from, from + markerLength, 'heading-marker');
-  const textStart = from + markerLength + 1;
-  add(out, textStart, textStart + line.length - markerLength - 1, 'heading', {
-    level: markerLength,
-  });
-  parseInline(line.slice(markerLength + 1), textStart, out);
-}
-
-/** タスクリスト行の装飾（マーカー / チェックボックス / 本文インライン）を追加する */
-function addTaskDecorations(
-  out: MarkdownDecoration[],
-  line: string,
-  task: RegExpExecArray,
-  from: number,
-): void {
-  const indentLen = task[1]?.length ?? 0;
-  const markerLen = task[2]?.length ?? 0;
-  const markerStart = from + indentLen;
-  // line.indexOf は行内の相対位置で検索し、from を加えて絶対位置にする
-  const checkboxStart = from + line.indexOf('[', indentLen + markerLen);
-  add(out, markerStart, checkboxStart, 'task-marker');
-  add(out, checkboxStart, checkboxStart + TASK_CHECKBOX_LENGTH, 'task-checkbox', {
-    checked: task[3] === 'x' || task[3] === 'X',
-  });
-  const rest = task[4] ?? '';
-  const restStart = from + line.indexOf(rest, indentLen + markerLen + 1);
-  parseInline(line.slice(restStart - from), restStart, out);
-}
-
-/** 箇条書き行の装飾（マーカー / 本文インライン）を追加する */
-function addListDecorations(
-  out: MarkdownDecoration[],
-  line: string,
-  list: RegExpExecArray,
-  from: number,
-): void {
-  const indentLen = list[1]?.length ?? 0;
-  const marker = list[2] ?? '';
-  const markerStart = from + indentLen;
-  add(out, markerStart, markerStart + marker.length + 1, 'list-marker');
-  const rest = list[3] ?? '';
-  const restStart = from + line.indexOf(rest, indentLen + marker.length + 1);
-  parseInline(line.slice(restStart - from), restStart, out);
-}
-
-/** 引用行の装飾（マーカー / 引用全体 / 本文インライン）を追加する */
-function addQuoteDecorations(
-  out: MarkdownDecoration[],
-  quote: RegExpExecArray,
-  from: number,
-  to: number,
-): void {
-  const markerStart = from + (quote[1]?.length ?? 0);
-  add(out, markerStart, markerStart + (quote[2]?.length ?? 0), 'quote-marker');
-  add(out, from, to, 'quote');
-  const rest = quote[3] ?? '';
-  if (rest !== '') {
-    parseInline(rest, to - rest.length, out);
-  }
 }
 
 /** 装飾を出力リストへ追加する（空範囲は無視する） */
@@ -210,16 +177,4 @@ function add(
     return;
   }
   out.push({ from, to, type, ...extra });
-}
-
-/** フェンス閉じ行かどうか（同じ char が open の長さ以上続き、残りは空白のみ） */
-function isFenceClose(line: string, fence: { char: string; len: number }): boolean {
-  let run = 0;
-  for (const current of line) {
-    if (current !== fence.char) {
-      break;
-    }
-    run += 1;
-  }
-  return run >= fence.len && line.slice(run).trim() === '';
 }

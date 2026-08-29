@@ -151,18 +151,8 @@ export async function readVaultTree(
   if (defaultBranch === null) {
     return null;
   }
-  return {
-    defaultBranch,
-    truncated: parsed.truncated === true,
-    treeSha: readNonEmptyString(parsed.treeSha),
-    entries: collectTreeEntries(parsed.entries),
-  };
-}
-
-/** ツリーエントリ列を読む（形式不正の項目はスキップする） */
-function collectTreeEntries(items: readonly unknown[]): VaultTreeEntry[] {
   const entries: VaultTreeEntry[] = [];
-  for (const item of items) {
+  for (const item of parsed.entries) {
     if (!isR2Record(item)) {
       continue;
     }
@@ -174,7 +164,12 @@ function collectTreeEntries(items: readonly unknown[]): VaultTreeEntry[] {
       entries.push({ path, type: item.type, sha: readNonEmptyString(item.sha) });
     }
   }
-  return entries;
+  return {
+    defaultBranch,
+    truncated: parsed.truncated === true,
+    treeSha: readNonEmptyString(parsed.treeSha),
+    entries,
+  };
 }
 
 /** writeVaultTree の入力（entries の sha は省略可。省略時は null で保存される） */

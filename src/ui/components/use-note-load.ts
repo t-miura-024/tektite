@@ -65,9 +65,21 @@ export function useNoteLoad(core: NotePaneCore): { load: () => Promise<void> } {
       core.onNoteContentLoaded?.(note.content);
       readyRef.current = true;
       core.setLoadState({ kind: 'ready', note });
-      await announceDraftIfAny(core);
+      const draft = await run(
+        loadDraft({ owner: core.owner, name: core.name }, core.notePath),
+      ).catch(() => null);
+      if (draft !== null) {
+        core.setDraftNotice(draft);
+      }
     } catch (error) {
-      handleLoadError(core, error, load);
+      if (isSessionExpiredError(error)) {
+        core.notify('セッションの有効期限が切れました。ログインし直してください。');
+        core.onSessionExpired();
+        return;
+      }
+      const message = noteErrorMessage(error);
+      core.setLoadState({ kind: 'error', message });
+      core.notify(message, { label: '再試行', onClick: () => void load() });
     }
   }, [
     core,
@@ -99,28 +111,6 @@ function applyEditorContent(core: NotePaneCore, content: string, title: string):
   core.setTitleEditing(false);
   core.setTitleDraft('');
   core.setTitleError(null);
-}
-
-/** 未保存の変更（Draft）があれば復元通知を出す */
-async function announceDraftIfAny(core: NotePaneCore): Promise<void> {
-  const draft = await run(loadDraft({ owner: core.owner, name: core.name }, core.notePath)).catch(
-    () => null,
-  );
-  if (draft !== null) {
-    core.setDraftNotice(draft);
-  }
-}
-
-/** 読み込み失敗の共通処理（セッション失効 / エラー表示 + 再試行導線） */
-function handleLoadError(core: NotePaneCore, error: unknown, retry: () => Promise<void>): void {
-  if (isSessionExpiredError(error)) {
-    core.notify('セッションの有効期限が切れました。ログインし直してください。');
-    core.onSessionExpired();
-    return;
-  }
-  const message = noteErrorMessage(error);
-  core.setLoadState({ kind: 'error', message });
-  core.notify(message, { label: '再試行', onClick: () => void retry() });
 }
 
 /** ノート切替時に paint 前へ loading を反映する（NoteEditor の二重マウント防止） */

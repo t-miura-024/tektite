@@ -13,16 +13,6 @@ export type VaultTreeChange = {
   readonly path: string;
 };
 
-/** パスの祖先ディレクトリパスをルート側から順に返す（a/b/c.md → ['a', 'a/b']） */
-function ancestorPaths(path: string): readonly string[] {
-  const segments = path.split('/');
-  const ancestors: string[] = [];
-  for (let depth = 1; depth < segments.length; depth += 1) {
-    ancestors.push(segments.slice(0, depth).join('/'));
-  }
-  return ancestors;
-}
-
 /**
  * ツリーキャッシュへファイル操作の結果を反映する（M4: 一括コミットの R2 先行化）。
  *
@@ -48,11 +38,21 @@ export async function applyVaultTreeChanges(
   const fileShas = new Map(
     tree.entries.filter((entry) => entry.type === 'file').map((entry) => [entry.path, entry.sha]),
   );
-  applyFileShas(fileShas, changes);
+  for (const change of changes) {
+    if (change.op === 'add') {
+      if (!fileShas.has(change.path)) {
+        // ローカルで新規追加されたファイル（GitHub 由来の blob sha は未知）
+        fileShas.set(change.path, null);
+      }
+      continue;
+    }
+    fileShas.delete(change.path);
+  }
   const directories = new Set<string>();
   for (const path of fileShas.keys()) {
-    for (const ancestor of ancestorPaths(path)) {
-      directories.add(ancestor);
+    const segments = path.split('/');
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      directories.add(segments.slice(0, depth).join('/'));
     }
   }
   const entries: VaultTreeEntry[] = [
@@ -70,21 +70,4 @@ export async function applyVaultTreeChanges(
     })),
   ];
   await writeVaultTree(bucket, owner, repo, { ...tree, entries });
-}
-
-/** ファイルエントリの add / remove を適用する */
-function applyFileShas(
-  fileShas: Map<string, string | null>,
-  changes: readonly VaultTreeChange[],
-): void {
-  for (const change of changes) {
-    if (change.op === 'add') {
-      if (!fileShas.has(change.path)) {
-        // ローカルで新規追加されたファイル（GitHub 由来の blob sha は未知）
-        fileShas.set(change.path, null);
-      }
-      continue;
-    }
-    fileShas.delete(change.path);
-  }
 }

@@ -32,30 +32,25 @@ export function useNoteDraft(core: NotePaneCore): NoteDraftActions {
     [owner, name, notePath, isPending],
   );
 
-  function restoreDraft(): void {
-    const draft = core.draftNotice;
-    if (!draft) {
-      return;
-    }
-    programmaticSetContent(draft.content);
-    contentRef.current = draft.content;
-    core.setDraftNotice(null);
-    core.setDirty(true);
-    dirtyRef.current = true;
-  }
-
-  async function discardDraft(): Promise<void> {
-    core.setDraftNotice(null);
-    await run(clearDraft({ owner, name }, notePath)).catch(() => {});
-    core.setDirty(false);
-  }
-
-  /** setContent（プログラム的置換）中は onChange を無視する */
-  function programmaticSetContent(content: string): void {
-    programmaticRef.current = true;
-    handleRef.current?.setContent(content);
-    programmaticRef.current = false;
-  }
-
-  return { flushDraft, restoreDraft, discardDraft };
+  return {
+    flushDraft,
+    restoreDraft: (): void => {
+      const draft = core.draftNotice;
+      if (!draft) {
+        return;
+      }
+      programmaticRef.current = true;
+      handleRef.current?.setContent(draft.content);
+      programmaticRef.current = false;
+      contentRef.current = draft.content;
+      core.setDraftNotice(null);
+      core.setDirty(true);
+      dirtyRef.current = true;
+    },
+    discardDraft: async (): Promise<void> => {
+      core.setDraftNotice(null);
+      await run(clearDraft({ owner, name }, notePath)).catch(() => {});
+      core.setDirty(false);
+    },
+  };
 }

@@ -75,78 +75,6 @@ function isValidEntryPath(path: string): boolean {
     .every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
 }
 
-/** 標準 base64（btoa 出力相当）かどうか。空文字（空ファイル）も許容する */
-function isValidBase64(value: string): boolean {
-  return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
-}
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/** ボディを検証し、変更列とメッセージへ正規化する（不正は null） */
-function parseCommitBody(raw: unknown): { changes: ParsedChange[]; message: string } | null {
-  if (typeof raw !== 'object' || raw === null) {
-    return null;
-  }
-  if (!('changes' in raw) || !('message' in raw)) {
-    return null;
-  }
-  const body = { changes: raw.changes, message: raw.message };
-  if (typeof body.message !== 'string' || body.message.length === 0) {
-    return null;
-  }
-  if (
-    !Array.isArray(body.changes) ||
-    body.changes.length === 0 ||
-    body.changes.length > MAX_CHANGES
-  ) {
-    return null;
-  }
-  const changes: ParsedChange[] = [];
-  for (const item of body.changes) {
-    if (typeof item !== 'object' || item === null) {
-      return null;
-    }
-    if (!isRecordObject(item)) {
-      return null;
-    }
-    const change = item;
-    if (
-      change.op !== 'create' &&
-      change.op !== 'update' &&
-      change.op !== 'delete' &&
-      change.op !== 'move' &&
-      change.op !== 'copy'
-    ) {
-      return null;
-    }
-    if (typeof change.path !== 'string' || !isValidEntryPath(change.path)) {
-      return null;
-    }
-    if (change.op === 'move' || change.op === 'copy') {
-      if (
-        typeof change.to !== 'string' ||
-        !isValidEntryPath(change.to) ||
-        change.to === change.path
-      ) {
-        return null;
-      }
-      changes.push({ op: change.op, path: change.path, to: change.to, content: null });
-      continue;
-    }
-    if (change.op === 'delete') {
-      changes.push({ op: 'delete', path: change.path, to: null, content: null });
-      continue;
-    }
-    if (typeof change.content !== 'string' || !isValidBase64(change.content)) {
-      return null;
-    }
-    changes.push({ op: change.op, path: change.path, to: null, content: change.content });
-  }
-  return { changes, message: body.message };
-}
-
 export async function handleCommitPost(context: RouteContext): Promise<Response> {
   const { env, request, params } = context;
   const owner = paramToString(params.owner);
@@ -173,7 +101,88 @@ export async function handleCommitPost(context: RouteContext): Promise<Response>
     return auth.response;
   }
 
-  const body = parseCommitBody(await request.json().catch(() => null));
+  const _raw: unknown = await request.json().catch(() => null);
+  let body: { changes: ParsedChange[]; message: string } | null = null;
+  const isRecordObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null;
+  if (isRecordObject(_raw) && 'changes' in _raw && 'message' in _raw) {
+    const _changes = _raw.changes;
+    const _message = _raw.message;
+    if (
+      typeof _message === 'string' &&
+      _message.length > 0 &&
+      Array.isArray(_changes) &&
+      _changes.length > 0 &&
+      _changes.length <= MAX_CHANGES
+    ) {
+      const changes: ParsedChange[] = [];
+      let _failed = false;
+      for (const item of _changes) {
+        if (!isRecordObject(item)) {
+          _failed = true;
+          break;
+        }
+        if (!('op' in item) || !('path' in item)) {
+          _failed = true;
+          break;
+        }
+        const _op = item.op;
+        const _path = item.path;
+        if (typeof _path !== 'string' || !isValidEntryPath(_path)) {
+          _failed = true;
+          break;
+        }
+        if (
+          _op !== 'create' &&
+          _op !== 'update' &&
+          _op !== 'delete' &&
+          _op !== 'move' &&
+          _op !== 'copy'
+        ) {
+          _failed = true;
+          break;
+        }
+        if (_op === 'move' || _op === 'copy') {
+          if (!('to' in item)) {
+            _failed = true;
+            break;
+          }
+          const _to = item.to;
+          if (typeof _to !== 'string' || !isValidEntryPath(_to) || _to === _path) {
+            _failed = true;
+            break;
+          }
+          changes.push({ op: _op, path: _path, to: _to, content: null });
+          continue;
+        }
+        if (_op === 'delete') {
+          changes.push({ op: 'delete', path: _path, to: null, content: null });
+          continue;
+        }
+        if (!('content' in item)) {
+          _failed = true;
+          break;
+        }
+        const _content = item.content;
+        if (
+          typeof _content !== 'string' ||
+          !(_content.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(_content))
+        ) {
+          _failed = true;
+          break;
+        }
+        if (_op === 'create' || _op === 'update') {
+          changes.push({ op: _op, path: _path, to: null, content: _content });
+          continue;
+        }
+        _failed = true;
+        break;
+      }
+      if (!_failed) {
+        body = { changes, message: _message };
+      }
+    }
+  }
   if (body === null) {
     return Response.json({ error: 'invalid_body' }, { status: 400 });
   }

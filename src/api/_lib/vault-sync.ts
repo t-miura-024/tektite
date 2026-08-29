@@ -111,37 +111,7 @@ export async function syncVault(
       response: Response.json({ error: 'sync_conflict' }, { status: 409 }),
     };
   }
-  return pushAndFinalize({
-    baseUrl,
-    token,
-    bucket,
-    owner,
-    repoName,
-    ghMap: treeResult.ghMap,
-    defaultBranch: meta.defaultBranch,
-    treeSha: treeResult.treeSha,
-    conflicts: syncConflicts,
-    pulled,
-    now,
-  });
-}
-
-/** プッシュと完了処理（衝突がある間はツリーキャッシュ / meta を更新しない） */
-async function pushAndFinalize(context: {
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly bucket: R2Bucket;
-  readonly owner: string;
-  readonly repoName: string;
-  readonly ghMap: ReadonlyMap<string, string>;
-  readonly defaultBranch: string;
-  readonly treeSha: string | null;
-  readonly conflicts: readonly SyncConflict[];
-  readonly pulled: number;
-  readonly now: () => Date;
-}): Promise<SyncOutcome> {
-  const { baseUrl, token, bucket, owner, repoName } = context;
-  const conflictPaths = new Set(context.conflicts.map((conflict) => conflict.path));
+  const conflictPaths = new Set(syncConflicts.map((conflict) => conflict.path));
   let pushed = 0;
   try {
     pushed = await pushPendingChanges(
@@ -150,7 +120,7 @@ async function pushAndFinalize(context: {
       bucket,
       owner,
       repoName,
-      context.ghMap,
+      treeResult.ghMap,
       conflictPaths,
     );
   } catch (error) {
@@ -166,25 +136,25 @@ async function pushAndFinalize(context: {
     }
     throw error;
   }
-  if (context.conflicts.length === 0) {
+  if (syncConflicts.length === 0) {
     await finalizeSync(
       bucket,
       owner,
       repoName,
-      context.defaultBranch,
-      context.treeSha,
-      context.ghMap,
-      context.now,
+      meta.defaultBranch,
+      treeResult.treeSha,
+      treeResult.ghMap,
+      now,
     );
   }
   return {
     ok: true,
     result: {
       status: 'synced',
-      syncedAt: context.now().toISOString(),
-      pulled: context.pulled,
+      syncedAt: now().toISOString(),
+      pulled,
       pushed,
-      conflicts: context.conflicts,
+      conflicts: syncConflicts,
     },
   };
 }

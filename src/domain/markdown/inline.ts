@@ -33,88 +33,71 @@ export function parseInline(text: string, base: number, out: MarkdownDecoration[
       continue;
     }
     if (ch === '`') {
-      i = scanInlineCode(text, i, base, out);
+      const run = countRun(text, i, '`');
+      const close = text.indexOf('`'.repeat(run), i + run);
+      if (close !== -1) {
+        add(out, base + i, base + close + run, 'inline-code');
+        i = close + run;
+        continue;
+      }
+      i = i + run;
       continue;
     }
     if (ch === '*') {
-      i = scanEmphasis(text, i, base, out);
+      const run = countRun(text, i, '*');
+      if (run >= 3) {
+        const close = text.indexOf('***', i + run);
+        if (close !== -1) {
+          add(out, base + i + 3, base + close, 'bold-italic');
+          i = close + 3;
+          continue;
+        }
+        i = i + run;
+        continue;
+      }
+      if (run === 2) {
+        const close = text.indexOf('**', i + 2);
+        if (close !== -1) {
+          add(out, base + i + 2, base + close, 'bold');
+          i = close + 2;
+          continue;
+        }
+        i = i + 2;
+        continue;
+      }
+      const close = text.indexOf('*', i + 1);
+      if (close !== -1) {
+        add(out, base + i + 1, base + close, 'italic');
+        i = close + 1;
+        continue;
+      }
+      i = i + 1;
       continue;
     }
     if (ch === '[' && text[i - 1] !== '!') {
-      const next = scanLink(text, i, base, out);
-      if (next !== null) {
-        i = next;
+      const closeBracket = text.indexOf(']', i + 1);
+      if (closeBracket === -1 || text[closeBracket + 1] !== '(') {
+        i += 1;
         continue;
       }
-      i += 1;
+      const urlFrom = closeBracket + 2;
+      const urlTo = text.indexOf(')', urlFrom);
+      if (urlTo === -1) {
+        i += 1;
+        continue;
+      }
+      const url = text.slice(urlFrom, urlTo);
+      if (url === '' || /[\s<>]/.test(url)) {
+        i += 1;
+        continue;
+      }
+      add(out, base + i + 1, base + closeBracket, 'link-text');
+      add(out, base + urlFrom, base + urlTo, 'link-url');
+      i = urlTo;
       continue;
     }
     i += 1;
   }
-}
-
-/** インラインコード（バッククォート連続で挟まれた範囲）を解析する。戻り値は次の走査位置 */
-function scanInlineCode(
-  text: string,
-  start: number,
-  base: number,
-  out: MarkdownDecoration[],
-): number {
-  const run = countRun(text, start, '`');
-  const close = text.indexOf('`'.repeat(run), start + run);
-  if (close !== -1) {
-    add(out, base + start, base + close + run, 'inline-code');
-    return close + run;
-  }
-  return start + run;
-}
-
-/** 強調（* / ** / ***）を解析する。戻り値は次の走査位置 */
-function scanEmphasis(
-  text: string,
-  start: number,
-  base: number,
-  out: MarkdownDecoration[],
-): number {
-  const run = countRun(text, start, '*');
-  if (run >= 3) {
-    const close = text.indexOf('***', start + run);
-    if (close !== -1) {
-      add(out, base + start + 3, base + close, 'bold-italic');
-      return close + 3;
-    }
-    return start + run;
-  }
-  if (run === 2) {
-    const close = text.indexOf('**', start + 2);
-    if (close !== -1) {
-      add(out, base + start + 2, base + close, 'bold');
-      return close + 2;
-    }
-    return start + 2;
-  }
-  const close = text.indexOf('*', start + 1);
-  if (close !== -1) {
-    add(out, base + start + 1, base + close, 'italic');
-    return close + 1;
-  }
-  return start + 1;
-}
-
-/** `[テキスト](url)` 形式のリンクを解析する。リンクでなければ null を返す */
-function scanLink(
-  text: string,
-  start: number,
-  base: number,
-  out: MarkdownDecoration[],
-): number | null {
-  const link = findLink(text, start);
-  if (link === null) {
-    return null;
-  }
-  add(out, base + start + 1, base + link.labelTo, 'link-text');
-  add(out, base + link.urlFrom, base + link.urlTo, 'link-url');
-  return link.urlTo;
 }
 
 /** from 以降に ch が何文字連続するかを数える */
@@ -127,35 +110,4 @@ function countRun(text: string, from: number, ch: string): number {
     n += 1;
   }
   return n;
-}
-
-type LinkRange = {
-  /** `]` の位置（排他） */
-  readonly labelTo: number;
-  /** `(` の直後の位置 */
-  readonly urlFrom: number;
-  /** `)` の位置（排他） */
-  readonly urlTo: number;
-};
-
-/**
- * `[テキスト](url)` 形式のリンクを探す。
- * 画像（`![...]`）は openBracket 側で除外済み。空 URL や空白・<> を含む
- * 複雑な URL（タイトル付き等）は装飾対象外として null を返す。
- */
-function findLink(text: string, openBracket: number): LinkRange | null {
-  const closeBracket = text.indexOf(']', openBracket + 1);
-  if (closeBracket === -1 || text[closeBracket + 1] !== '(') {
-    return null;
-  }
-  const urlFrom = closeBracket + 2;
-  const urlTo = text.indexOf(')', urlFrom);
-  if (urlTo === -1) {
-    return null;
-  }
-  const url = text.slice(urlFrom, urlTo);
-  if (url === '' || /[\s<>]/.test(url)) {
-    return null;
-  }
-  return { labelTo: closeBracket, urlFrom, urlTo };
 }

@@ -10,10 +10,6 @@
 const CODE_MASK_OPEN = '\uE020';
 const CODE_MASK_CLOSE = '\uE021';
 
-function codeMaskPlaceholder(index: number): string {
-  return `${CODE_MASK_OPEN}${index}${CODE_MASK_CLOSE}`;
-}
-
 /** マスク済みコード 1 件 */
 export type CodeMaskItem = {
   readonly marker: string;
@@ -22,30 +18,6 @@ export type CodeMaskItem = {
 
 /** フェンスドコードの開始（``` または ~~~） */
 const FENCE_OPEN_RE = /^(`{3,}|~{3,})(.*)$/;
-
-/** from 以降に ch が何文字連続するか */
-function countRun(text: string, from: number, ch: string): number {
-  let n = 0;
-  for (const current of text.slice(from)) {
-    if (current !== ch) {
-      break;
-    }
-    n += 1;
-  }
-  return n;
-}
-
-/** フェンス閉じ行かどうか（同じ char が open の長さ以上続き、残りは空白のみ） */
-function isFenceClose(line: string, fence: { char: string; len: number }): boolean {
-  let run = 0;
-  for (const current of line) {
-    if (current !== fence.char) {
-      break;
-    }
-    run += 1;
-  }
-  return run >= fence.len && line.slice(run).trim() === '';
-}
 
 /**
  * フェンスドコードとインラインコードをプレースホルダーで一時マスクする。
@@ -58,14 +30,25 @@ export function maskCode(source: string): { text: string; items: readonly CodeMa
   let fenceLines: string[] | null = null;
 
   const addMask = (code: string): string => {
-    const marker = codeMaskPlaceholder(items.length);
+    const marker = `${CODE_MASK_OPEN}${items.length}${CODE_MASK_CLOSE}`;
     items.push({ marker, code });
     return marker;
   };
 
   for (const line of source.split('\n')) {
     if (fence !== null) {
-      if (isFenceClose(line, fence)) {
+      const currentFence = fence;
+      const fenceClose = ((): boolean => {
+        let run = 0;
+        for (const current of line) {
+          if (current !== currentFence.char) {
+            break;
+          }
+          run += 1;
+        }
+        return run >= currentFence.len && line.slice(run).trim() === '';
+      })();
+      if (fenceClose) {
         out.push(addMask([...(fenceLines ?? []), line].join('\n')));
         fence = null;
         fenceLines = null;
@@ -80,40 +63,45 @@ export function maskCode(source: string): { text: string; items: readonly CodeMa
       fenceLines = [line];
       continue;
     }
-    out.push(maskInlineCode(line, addMask));
+    const maskedLine = ((): string => {
+      let outInline = '';
+      for (let i = 0; i < line.length;) {
+        const ch = line[i] ?? '';
+        if (ch === '\\') {
+          outInline += ch + (line[i + 1] ?? '');
+          i += 2;
+          continue;
+        }
+        if (ch === '`') {
+          let n = 0;
+          for (const current of line.slice(i)) {
+            if (current !== '`') {
+              break;
+            }
+            n += 1;
+          }
+          const run = n;
+          const close = line.indexOf('`'.repeat(run), i + run);
+          if (close === -1) {
+            outInline += line.slice(i);
+            break;
+          }
+          outInline += addMask(line.slice(i, close + run));
+          i = close + run;
+          continue;
+        }
+        outInline += ch;
+        i += 1;
+      }
+      return outInline;
+    })();
+    out.push(maskedLine);
   }
   // フェンスが閉じないまま終了（不正な本文）: マスクせず原文のまま
   if (fenceLines !== null) {
     out.push(...fenceLines);
   }
   return { text: out.join('\n'), items };
-}
-
-/** 行内のインラインコードスパンをマスクする */
-function maskInlineCode(line: string, addMask: (code: string) => string): string {
-  let out = '';
-  for (let i = 0; i < line.length;) {
-    const ch = line[i] ?? '';
-    if (ch === '\\') {
-      out += ch + (line[i + 1] ?? '');
-      i += 2;
-      continue;
-    }
-    if (ch === '`') {
-      const run = countRun(line, i, '`');
-      const close = line.indexOf('`'.repeat(run), i + run);
-      if (close === -1) {
-        out += line.slice(i);
-        break;
-      }
-      out += addMask(line.slice(i, close + run));
-      i = close + run;
-      continue;
-    }
-    out += ch;
-    i += 1;
-  }
-  return out;
 }
 
 /** コードマスクを元のコードへ戻す */

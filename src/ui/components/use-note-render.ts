@@ -48,16 +48,6 @@ type UseNoteRenderArgs = {
   onSessionExpired: () => void;
 };
 
-/** 画像 Embed の raw プロキシ URL を作る（パスは 1 セグメントにエンコード） */
-function rawImageUrl(ref: VaultRef, path: string): string {
-  return `/api/raw/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.name)}/${encodeURIComponent(path)}`;
-}
-
-/** WikiLink の遷移先 URL を作る（#見出し はスラグ化して付与する） */
-function noteHref(ref: VaultRef, path: string, subpath: string | null): string {
-  return `${noteRoutePath(ref, path)}${subpath !== null ? `#${slugify(subpath)}` : ''}`;
-}
-
 export function useNoteRender({
   vaultRef,
   notePath,
@@ -91,8 +81,10 @@ export function useNoteRender({
         path: notePath,
         contents,
         filePaths,
-        imageUrl: (path) => rawImageUrl(vaultRef, path),
-        linkHref: (path, subpath) => noteHref(vaultRef, path, subpath),
+        imageUrl: (path) =>
+          `/api/raw/${encodeURIComponent(vaultRef.owner)}/${encodeURIComponent(vaultRef.name)}/${encodeURIComponent(path)}`,
+        linkHref: (path, subpath) =>
+          `${noteRoutePath(vaultRef, path)}${subpath !== null ? `#${slugify(subpath)}` : ''}`,
       });
       setFrontmatter(parseNotation(content).frontmatter);
       setEmbedNotice(

@@ -96,17 +96,44 @@ export async function fetchGithubTree(
     };
   }
   const body: unknown = await readJsonBody(response);
-  const entries = readStringEntries(body);
-  if (entries === null) {
-    return {
-      ok: false,
-      reason: 'github_error',
-      response: Response.json({ error: 'github_error' }, { status: 502 }),
-    };
+  let entries: UnknownRecord[] | null = null;
+  {
+    if (!isRecordObject(body)) {
+      return {
+        ok: false,
+        reason: 'github_error',
+        response: Response.json({ error: 'github_error' }, { status: 502 }),
+      };
+    }
+    const tree = body.tree;
+    if (!Array.isArray(tree)) {
+      return {
+        ok: false,
+        reason: 'github_error',
+        response: Response.json({ error: 'github_error' }, { status: 502 }),
+      };
+    }
+    const list: UnknownRecord[] = [];
+    for (const item of tree) {
+      if (isRecordObject(item)) {
+        list.push(item);
+      }
+    }
+    entries = list;
   }
   const ghMap = new Map<string, string>();
   for (const entry of entries) {
-    collectBlobSha(entry, ghMap);
+    const path = entry.path;
+    const sha = entry.sha;
+    if (
+      entry.type !== 'blob' ||
+      typeof path !== 'string' ||
+      typeof sha !== 'string' ||
+      sha.length === 0
+    ) {
+      continue;
+    }
+    ghMap.set(path, sha);
   }
   const treeSha = readStringField(body, 'sha');
   return { ok: true, treeSha: treeSha === null || treeSha.length === 0 ? null : treeSha, ghMap };
@@ -116,39 +143,6 @@ type UnknownRecord = Record<string, unknown>;
 
 function isRecordObject(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null;
-}
-
-/** ツリー応答から blob エントリ列を読む（形式不正は null） */
-function readStringEntries(body: unknown): UnknownRecord[] | null {
-  if (!isRecordObject(body)) {
-    return null;
-  }
-  const tree = body.tree;
-  if (!Array.isArray(tree)) {
-    return null;
-  }
-  const entries: UnknownRecord[] = [];
-  for (const item of tree) {
-    if (isRecordObject(item)) {
-      entries.push(item);
-    }
-  }
-  return entries;
-}
-
-/** blob エントリ（path / sha が文字列）をパス → sha マップへ登録する */
-function collectBlobSha(entry: UnknownRecord, ghMap: Map<string, string>): void {
-  const path = entry.path;
-  const sha = entry.sha;
-  if (
-    entry.type !== 'blob' ||
-    typeof path !== 'string' ||
-    typeof sha !== 'string' ||
-    sha.length === 0
-  ) {
-    return;
-  }
-  ghMap.set(path, sha);
 }
 
 /** Blob 1 件を取得して本文を返す（失敗は null。1 ノートの失敗が同期全体を落とさない） */

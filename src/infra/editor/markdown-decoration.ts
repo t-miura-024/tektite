@@ -88,21 +88,6 @@ const DECORATION_CLASSES: Readonly<Partial<Record<MarkdownDecorationType, string
   hr: 'tk-hr',
 };
 
-function toDecoration(d: MarkdownDecoration): Decoration {
-  if (d.type === 'heading') {
-    return Decoration.mark({ class: `tk-heading tk-heading-${d.level ?? 1}` });
-  }
-  if (d.type === 'task-checkbox') {
-    return Decoration.replace({ widget: new TaskCheckboxWidget(d.checked ?? false) });
-  }
-  if (LINE_TYPES.has(d.type)) {
-    const lineClass =
-      d.type === 'quote' ? 'tk-quote' : d.type === 'code-block' ? 'tk-code-block' : 'tk-code-fence';
-    return Decoration.line({ class: lineClass });
-  }
-  return Decoration.mark({ class: DECORATION_CLASSES[d.type] ?? '' });
-}
-
 /** RangeSetBuilder の startSide 順序: line decoration 相当（quote 等）を先に置く */
 function startSide(d: MarkdownDecoration): number {
   return LINE_TYPES.has(d.type) ? -1 : 1;
@@ -124,13 +109,82 @@ export function computeDecorationSet(doc: Text): DecorationSet {
       from: decoration.from,
       to: decoration.to,
       line: LINE_TYPES.has(decoration.type),
-      value: toDecoration(decoration),
+      value: ((): Decoration => {
+        if (decoration.type === 'heading') {
+          return Decoration.mark({ class: `tk-heading tk-heading-${decoration.level ?? 1}` });
+        }
+        if (decoration.type === 'task-checkbox') {
+          return Decoration.replace({
+            widget: new TaskCheckboxWidget(decoration.checked ?? false),
+          });
+        }
+        if (LINE_TYPES.has(decoration.type)) {
+          const lineClass =
+            decoration.type === 'quote'
+              ? 'tk-quote'
+              : decoration.type === 'code-block'
+                ? 'tk-code-block'
+                : 'tk-code-fence';
+          return Decoration.line({ class: lineClass });
+        }
+        return Decoration.mark({ class: DECORATION_CLASSES[decoration.type] ?? '' });
+      })(),
     })),
-    ...htmlCommentRanges(text),
+    ...((): ZeroWidthRange[] => {
+      const commentRanges: ZeroWidthRange[] = [];
+      const comments = /<!--[\s\S]*?-->/g;
+      for (const match of text.matchAll(comments)) {
+        const from = match.index;
+        if (from === undefined) {
+          continue;
+        }
+        commentRanges.push({
+          from,
+          to: from + match[0].length,
+          line: false,
+          value: Decoration.mark({ class: 'tk-html-comment' }),
+        });
+      }
+      return commentRanges;
+    })(),
     ...frontmatterRanges(text),
     ...frontmatterFieldMarks(text),
-    ...cardHeadingRanges(text),
-    ...htmlBreakRanges(text),
+    ...((): Array<{ from: number; to: number; line: true; value: Decoration }> => {
+      const cardRanges: Array<{ from: number; to: number; line: true; value: Decoration }> = [];
+      let offset = 0;
+      let first = true;
+      for (const line of text.split('\n')) {
+        if (/^#{1,6}\s+.*#card\s*$/.test(line)) {
+          cardRanges.push({
+            from: offset,
+            to: offset,
+            line: true,
+            value: Decoration.line({
+              class: first ? 'tk-card-heading-first' : 'tk-card-heading',
+            }),
+          });
+          first = false;
+        }
+        offset += line.length + 1;
+      }
+      return cardRanges;
+    })(),
+    ...((): ZeroWidthRange[] => {
+      const breakRanges: ZeroWidthRange[] = [];
+      for (const match of text.matchAll(/<br\s*\/?>/gi)) {
+        const from = match.index;
+        if (from === undefined) {
+          continue;
+        }
+        breakRanges.push({
+          from,
+          to: from + match[0].length,
+          line: false,
+          value: Decoration.replace({ widget: new HtmlBreakWidget() }),
+        });
+      }
+      return breakRanges;
+    })(),
   ].toSorted((a, b) => a.from - b.from || Number(a.line) * -1 - Number(b.line) * -1);
   for (const range of ranges) {
     if (range.line) {
@@ -149,67 +203,6 @@ type ZeroWidthRange = {
   line: false;
   value: Decoration;
 };
-
-function htmlBreakRanges(text: string): ZeroWidthRange[] {
-  const ranges: ZeroWidthRange[] = [];
-  for (const match of text.matchAll(/<br\s*\/?>/gi)) {
-    const from = match.index;
-    if (from === undefined) {
-      continue;
-    }
-    ranges.push({
-      from,
-      to: from + match[0].length,
-      line: false,
-      value: Decoration.replace({ widget: new HtmlBreakWidget() }),
-    });
-  }
-  return ranges;
-}
-
-function cardHeadingRanges(text: string): Array<{
-  from: number;
-  to: number;
-  line: true;
-  value: Decoration;
-}> {
-  const ranges: Array<{ from: number; to: number; line: true; value: Decoration }> = [];
-  let offset = 0;
-  let first = true;
-  for (const line of text.split('\n')) {
-    if (/^#{1,6}\s+.*#card\s*$/.test(line)) {
-      ranges.push({
-        from: offset,
-        to: offset,
-        line: true,
-        value: Decoration.line({
-          class: first ? 'tk-card-heading-first' : 'tk-card-heading',
-        }),
-      });
-      first = false;
-    }
-    offset += line.length + 1;
-  }
-  return ranges;
-}
-
-function htmlCommentRanges(text: string): ZeroWidthRange[] {
-  const ranges: ZeroWidthRange[] = [];
-  const comments = /<!--[\s\S]*?-->/g;
-  for (const match of text.matchAll(comments)) {
-    const from = match.index;
-    if (from === undefined) {
-      continue;
-    }
-    ranges.push({
-      from,
-      to: from + match[0].length,
-      line: false,
-      value: Decoration.mark({ class: 'tk-html-comment' }),
-    });
-  }
-  return ranges;
-}
 
 /**
  * ドキュメント変更のたびに装飾を再計算する StateField。

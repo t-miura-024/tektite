@@ -20,7 +20,7 @@
  * - 張り替え対象外（移動と無関係なリンク・壊れリンク）は本文を変更しない
  */
 
-import { parseNotation, type NotationSpan } from '@/domain/notation/parse';
+import { parseNotation } from '@/domain/notation/parse';
 import { resolveNotePath } from '@/domain/notation/resolve';
 
 /** 移動 1 件（from: 旧パス → to: 新パス。ファイル・ディレクトリ内ファイル単位） */
@@ -66,22 +66,6 @@ type Edit = {
   readonly text: string;
 };
 
-/** 移動 1 件の張り替え対象パス（`[[a]]` が `dir/a.md` に解決するかの判定） */
-function isMovedCandidate(target: string, from: string): boolean {
-  return resolveNotePath(target, [from]) !== null;
-}
-
-/** 張り替え後のリンク本文（`[[to#subpath|alias]]` / `![[to#subpath|alias]]`） */
-function buildLinkText(
-  span: Extract<NotationSpan, { kind: 'wikilink' | 'embed' }>,
-  to: string,
-): string {
-  const open = span.kind === 'embed' ? '![[' : '[[';
-  const subpath = span.subpath === null ? '' : `#${span.subpath}`;
-  const alias = span.alias === null ? '' : `|${span.alias}`;
-  return `${open}${to}${subpath}${alias}]]`;
-}
-
 /**
  * 移動の対応に従って全ノートのリンクを張り替える。
  * 本文が変わったノートの新旧対応と、張り替えられなかった曖昧参照を返す。
@@ -103,12 +87,15 @@ export function planLinkRewrite(input: RewriteInput): RewritePlan {
       const to = resolved === null ? undefined : toByFrom.get(resolved);
       if (resolved !== null && to !== undefined) {
         // 解決先が移動元 → 移動先フルパスへ張り替える（エイリアス・見出しは保持）
-        edits.push({ from: span.from, to: span.to, text: buildLinkText(span, to) });
+        const open = span.kind === 'embed' ? '![[' : '[[';
+        const subpath = span.subpath === null ? '' : `#${span.subpath}`;
+        const alias = span.alias === null ? '' : `|${span.alias}`;
+        edits.push({ from: span.from, to: span.to, text: `${open}${to}${subpath}${alias}]]` });
         continue;
       }
       // 移動元が候補に入るが勝者にならなかった参照は曖昧として警告する
       const movedCandidates = moves
-        .filter((move) => isMovedCandidate(span.target, move.from))
+        .filter((move) => resolveNotePath(span.target, [move.from]) !== null)
         .map((move) => move.from);
       if (movedCandidates.length > 0) {
         issues.push({ kind: 'ambiguous', path, target: span.target, movedCandidates });

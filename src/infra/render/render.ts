@@ -19,13 +19,7 @@ import { noteDisplayName } from '@/application/note-name';
 import type { HLJSApi } from 'highlight.js';
 
 import { expandNoteEmbeds, type EmbedExpansionNode } from '@/domain/notation/embed';
-import {
-  parseNotation,
-  type EmbedSpan,
-  type NotationSpan,
-  type TagSpan,
-  type WikiLinkSpan,
-} from '@/domain/notation/parse';
+import { parseNotation } from '@/domain/notation/parse';
 import { resolveNotePath } from '@/domain/notation/resolve';
 
 import { escapeHtml } from '@/infra/render/escape';
@@ -44,10 +38,6 @@ import { createMarked } from '@/infra/render/marked-setup';
 /** 記法プレースホルダー（\uE010..\uE011。ユーザー本文と衝突しない私用領域） */
 const NOTATION_MARKER_OPEN = '\uE010';
 const NOTATION_MARKER_CLOSE = '\uE011';
-
-function notationPlaceholder(index: number): string {
-  return `${NOTATION_MARKER_OPEN}${index}${NOTATION_MARKER_CLOSE}`;
-}
 
 /** レンダリングの入力（呼び出し側 = UI 層が組み立てる） */
 export type RenderNotationOptions = {
@@ -137,7 +127,86 @@ function renderDocument(
   const replacements: Array<SpanReplacement & { from: number; to: number }> = [];
   const pending: Array<SpanReplacement & { from: number; to: number }> = [];
   for (let i = parsed.spans.length - 1; i >= 0; i -= 1) {
-    pending.push(replaceSpan(parsed.spans[i], i, context, children));
+    const span = parsed.spans[i];
+    const marker = `${NOTATION_MARKER_OPEN}${i}${NOTATION_MARKER_CLOSE}`;
+    if (span === undefined) {
+      pending.push({ marker, html: '', block: false, from: 0, to: 0 });
+      continue;
+    }
+    let rendered: { readonly html: string; readonly block: boolean } | null = null;
+    if (span.kind === 'wikilink') {
+      const resolved = resolveNotePath(span.target, context.options.filePaths);
+      const display = escapeHtml(span.alias ?? noteDisplayName(resolved ?? span.target));
+      if (resolved === null || !resolved.endsWith('.md')) {
+        rendered = {
+          html: `<a class="tk-wikilink tk-wikilink-broken" data-broken-link="true" title="リンク先が見つかりません">${display}</a>`,
+          block: false,
+        };
+      }
+      if (resolved !== null && resolved.endsWith('.md')) {
+        rendered = {
+          html:
+            `<a class="tk-wikilink" href="${escapeHtml(context.options.linkHref(resolved, span.subpath), true)}"` +
+            ` data-note-path="${escapeHtml(resolved, true)}" data-subpath="${escapeHtml(span.subpath ?? '', true)}">${display}</a>`,
+          block: false,
+        };
+      }
+    }
+    if (span.kind === 'tag') {
+      rendered = { html: `<span class="tk-tag">#${escapeHtml(span.tag)}</span>`, block: false };
+    }
+    if (span.kind === 'embed') {
+      const resolved = resolveNotePath(span.target, context.options.filePaths);
+      if (resolved === null) {
+        rendered = brokenEmbed(span.target);
+      }
+      if (resolved !== null && span.targetType === 'image') {
+        rendered = {
+          html:
+            `<img class="note-embed-image" src="${escapeHtml(context.options.imageUrl(resolved), true)}"` +
+            ` alt="${escapeHtml(span.alias ?? span.target, true)}" data-embed-image="true" loading="lazy">`,
+          block: false,
+        };
+      }
+      if (resolved !== null && span.targetType !== 'image') {
+        const childContent = context.options.contents.get(resolved);
+        if (childContent === undefined) {
+          rendered = brokenEmbed(span.target);
+        }
+        if (childContent !== undefined) {
+          const headerLink =
+            `<a class="note-embed-link" href="${escapeHtml(context.options.linkHref(resolved, null), true)}"` +
+            ` data-note-path="${escapeHtml(resolved, true)}">${escapeHtml(noteDisplayName(resolved))}</a>`;
+          const isCollapsed = !children.some((node) => node.path === resolved);
+          if (isCollapsed) {
+            rendered = {
+              html:
+                `<span class="embed-collapsed" title="循環参照または深さ上限のため展開しませんでした">${headerLink}` +
+                ` を展開しませんでした</span>`,
+              block: false,
+            };
+          }
+          if (!isCollapsed) {
+            const childHtml = renderDocument(
+              childContent,
+              context,
+              context.byParent.get(resolved) ?? [],
+            );
+            rendered = {
+              html:
+                `<div class="note-embed" data-embed-path="${escapeHtml(resolved, true)}">` +
+                `<div class="note-embed-header">${headerLink}` +
+                `</div><div class="note-embed-content">${childHtml}</div></div>`,
+              block: true,
+            };
+          }
+        }
+      }
+    }
+    if (rendered === null) {
+      rendered = { html: '', block: false };
+    }
+    pending.push({ ...rendered, marker, from: span.from, to: span.to });
   }
   // 後方のスパンから順に適用する（pending は後方から積まれている）
   for (const replacement of pending) {
@@ -168,116 +237,10 @@ function renderDocument(
   return html;
 }
 
-/**
- * スパン 1 件をプレースホルダーへ置換するための情報を組み立てる。
- * 後方から順に適用するため、ここではまだ本文へ適用しない。
- */
-function replaceSpan(
-  span: NotationSpan | undefined,
-  index: number,
-  context: RenderContext,
-  children: readonly EmbedExpansionNode[],
-): SpanReplacement & { readonly from: number; readonly to: number } {
-  const marker = notationPlaceholder(index);
-  if (span === undefined) {
-    return { marker, html: '', block: false, from: 0, to: 0 };
-  }
-  const rendered = renderSpan(span, context, children);
-  return { ...rendered, marker, from: span.from, to: span.to };
-}
-
-/** スパン種別ごとの描画を振り分ける */
-function renderSpan(
-  span: NotationSpan,
-  context: RenderContext,
-  children: readonly EmbedExpansionNode[],
-): { readonly html: string; readonly block: boolean } {
-  if (span.kind === 'wikilink') {
-    return { html: renderWikilink(span, context.options), block: false };
-  }
-  if (span.kind === 'tag') {
-    return { html: renderTag(span), block: false };
-  }
-  return renderEmbed(span, context, children);
-}
-
 /** 壊れ埋め込みの表示（解決不能・取得失敗） */
 function brokenEmbed(target: string): { readonly html: string; readonly block: boolean } {
   return {
     html: `<span class="tk-embed tk-embed-broken">![[${escapeHtml(target)}]]</span>`,
     block: false,
   };
-}
-
-/** 埋め込み（画像 / ノート本文）を描画する */
-function renderEmbed(
-  span: EmbedSpan,
-  context: RenderContext,
-  children: readonly EmbedExpansionNode[],
-): { readonly html: string; readonly block: boolean } {
-  const resolved = resolveNotePath(span.target, context.options.filePaths);
-  if (resolved === null) {
-    return brokenEmbed(span.target);
-  }
-  if (span.targetType === 'image') {
-    return {
-      html:
-        `<img class="note-embed-image" src="${escapeHtml(context.options.imageUrl(resolved), true)}"` +
-        ` alt="${escapeHtml(span.alias ?? span.target, true)}" data-embed-image="true" loading="lazy">`,
-      block: false,
-    };
-  }
-  return renderNoteEmbed(span.target, resolved, context, children);
-}
-
-/** ノート埋め込みを描画する（再帰ゲートを通ったもののみ本文を展開する） */
-function renderNoteEmbed(
-  target: string,
-  resolved: string,
-  context: RenderContext,
-  children: readonly EmbedExpansionNode[],
-): { readonly html: string; readonly block: boolean } {
-  const childContent = context.options.contents.get(resolved);
-  if (childContent === undefined) {
-    return brokenEmbed(target);
-  }
-  const headerLink =
-    `<a class="note-embed-link" href="${escapeHtml(context.options.linkHref(resolved, null), true)}"` +
-    ` data-note-path="${escapeHtml(resolved, true)}">${escapeHtml(noteDisplayName(resolved))}</a>`;
-  if (!children.some((node) => node.path === resolved)) {
-    // 循環参照・深さ上限で打ち切られた埋め込み: リンクのみ表示する
-    return {
-      html:
-        `<span class="embed-collapsed" title="循環参照または深さ上限のため展開しませんでした">${headerLink}` +
-        ` を展開しませんでした</span>`,
-      block: false,
-    };
-  }
-  // ツリーが展開を許した埋め込み: 子ノート本文を再帰的に描画する
-  const childHtml = renderDocument(childContent, context, context.byParent.get(resolved) ?? []);
-  return {
-    html:
-      `<div class="note-embed" data-embed-path="${escapeHtml(resolved, true)}">` +
-      `<div class="note-embed-header">${headerLink}` +
-      `</div><div class="note-embed-content">${childHtml}</div></div>`,
-    block: true,
-  };
-}
-
-/** WikiLink を <a> に変換する（壊れリンク / ノート以外のファイルは専用スタイル） */
-function renderWikilink(span: WikiLinkSpan, options: RenderNotationOptions): string {
-  const resolved = resolveNotePath(span.target, options.filePaths);
-  const display = escapeHtml(span.alias ?? noteDisplayName(resolved ?? span.target));
-  if (resolved === null || !resolved.endsWith('.md')) {
-    return `<a class="tk-wikilink tk-wikilink-broken" data-broken-link="true" title="リンク先が見つかりません">${display}</a>`;
-  }
-  return (
-    `<a class="tk-wikilink" href="${escapeHtml(options.linkHref(resolved, span.subpath), true)}"` +
-    ` data-note-path="${escapeHtml(resolved, true)}" data-subpath="${escapeHtml(span.subpath ?? '', true)}">${display}</a>`
-  );
-}
-
-/** タグを <span class="tk-tag"> に変換する（クリック動作は MVP 対象外） */
-function renderTag(span: TagSpan): string {
-  return `<span class="tk-tag">#${escapeHtml(span.tag)}</span>`;
 }

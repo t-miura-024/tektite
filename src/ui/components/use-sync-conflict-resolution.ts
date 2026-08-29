@@ -57,7 +57,10 @@ export function useSyncConflictResolution(core: NotePaneCore): SyncConflictResol
       if (generation !== generationRef.current) {
         return;
       }
-      programmaticSetContent(conflict.remote);
+      programmaticRef.current = true;
+      handleRef.current?.setContent(conflict.remote);
+      programmaticRef.current = false;
+      contentRef.current = conflict.remote;
       shaRef.current = sha;
       props.onNoteSaved?.(conflict.path, conflict.remote);
       await run(clearDraft({ owner, name }, notePath)).catch(() => {});
@@ -94,12 +97,6 @@ export function useSyncConflictResolution(core: NotePaneCore): SyncConflictResol
     }
   };
 
-  function programmaticSetContent(content: string): void {
-    programmaticRef.current = true;
-    handleRef.current?.setContent(content);
-    programmaticRef.current = false;
-    contentRef.current = content;
-  }
   const isResolving = (): boolean => resolvingRef.current;
 
   return { resolveOverwrite, resolveAdopt, isResolving };

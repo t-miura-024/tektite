@@ -79,7 +79,24 @@ export function useVaultSync(args: UseVaultSyncArgs): VaultSync {
       const newConflicts = result.conflicts ?? [];
       setSyncConflicts(newConflicts);
       setSyncVersion((version) => version + 1);
-      reportResult(newConflicts, result.pushed ?? 0, result.pulled ?? 0, notePath, notify);
+      if (newConflicts.length > 0) {
+        const openConflict =
+          notePath !== null && newConflicts.some((conflict) => conflict.path === notePath);
+        notify(
+          openConflict
+            ? '同期中に編集内容と GitHub の内容が衝突しました。差分を確認して解決してください。'
+            : `${newConflicts.length} 件の同期衝突があります。該当ノートを開いて解決してください。`,
+        );
+      }
+      if (newConflicts.length === 0) {
+        const pushed = result.pushed ?? 0;
+        const pulled = result.pulled ?? 0;
+        notify(
+          pushed > 0 || pulled > 0
+            ? `同期しました（プル ${pulled} 件 / プッシュ ${pushed} 件）。`
+            : '同期しました（変更はありませんでした）。',
+        );
+      }
       // 先にオーバーレイを解除し、ツリー・索引の更新はバックグラウンドで行う
       setSyncing(false);
       setSyncProgress(null);
@@ -119,29 +136,4 @@ export function useVaultSync(args: UseVaultSyncArgs): VaultSync {
     runSync,
     handleSyncConflictResolved,
   };
-}
-
-/** 同期結果をトーストへ反映する（衝突の有無で文言を出し分ける） */
-function reportResult(
-  conflicts: readonly VaultSyncConflict[],
-  pushed: number,
-  pulled: number,
-  notePath: string | null,
-  notify: (message: string, action?: ToastAction) => void,
-): void {
-  if (conflicts.length > 0) {
-    const openConflict =
-      notePath !== null && conflicts.some((conflict) => conflict.path === notePath);
-    notify(
-      openConflict
-        ? '同期中に編集内容と GitHub の内容が衝突しました。差分を確認して解決してください。'
-        : `${conflicts.length} 件の同期衝突があります。該当ノートを開いて解決してください。`,
-    );
-    return;
-  }
-  notify(
-    pushed > 0 || pulled > 0
-      ? `同期しました（プル ${pulled} 件 / プッシュ ${pushed} 件）。`
-      : '同期しました（変更はありませんでした）。',
-  );
 }
