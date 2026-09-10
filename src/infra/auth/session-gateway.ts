@@ -1,15 +1,10 @@
 /**
- * SessionGateway のブラウザ実装（Effect Layer）:
- * Pages Functions の認証エンドポイントを呼ぶ。
- *
- * - GET  /api/auth/me     … セッション検証（暗号化 Cookie の復号 + GitHub /user 確認）
- * - POST /api/auth/logout … セッション Cookie の削除
- *
- * トークンは Workers 側のみ保持（ADR-0002）のため、ブラウザは Cookie の存在を
- * 直接読むことなく、これらのエンドポイントの応答だけでログイン状態を判定する。
- *
- * application 層が定義する SessionGateway（Effect Service）の具体実装を
- * Layer として提供する。組成（UI への注入）は src/composition が担う。
+ * SessionGateway のブラウザ実装（Effect Layer）。
+ * Pages Functions の認証 API を呼ぶ。
+ * - GET /api/auth/me … セッション検証
+ * - POST /api/auth/logout … Cookie 削除
+ * トークンは Workers 側保持のため応答だけで状態を判定する。
+ * 組成は src/composition が担う。
  */
 
 import { Effect, Layer } from 'effect';

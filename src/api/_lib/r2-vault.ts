@@ -1,27 +1,8 @@
 /**
- * R2 上の Vault 実体ストレージ（M3: R2 読み取り経路と初期同期）。
- *
- * GitHub API のレート制限解消のため、Vault の実体（ツリー・ノート本文）を
- * R2 バケット（VAULT_BUCKET）に保持し、読み取りは基本的に R2 から返す。
- * キー設計（AI 判断）:
- *
- * - `vaults/{owner}/{repo}/meta`           … 初期同期完了マーカー
- *   （JSON: { syncedAt, defaultBranch, treeSha }）。このキーの存在が
- *   「R2 が正」を有効にする前提であり、存在しない間は GitHub 直行する
- * - `vaults/{owner}/{repo}/tree`           … ファイルツリーのキャッシュ
- *   （JSON: { defaultBranch, truncated, treeSha, entries }）
- * - `vaults/{owner}/{repo}/notes/{path}`   … ノート本文 + sha（コンテンツハッシュ）
- *   （JSON: { sha, content }）。sha は GitHub の blob sha（コンテンツから
- *   決まるハッシュ）で、同期（M5）のツリー sha 比較と保存時の楽観ロックに使う
- *
- * 添付バイナリ（raw/{path}）とローカル変更マーカー（deleted / dirty）は
- * r2-vault-assets / r2-vault-marks が担う。共通走査は r2-list。
- *
- * 書き込みは初期同期（sync ルート）・遅延キャッシュ（tree/notes/raw ルート）・
- * 保存（notes blob PUT / files 一括コミット、M4 の R2 先行化）が行う。
- * 保存後の sha はコンテンツハッシュ（SHA-256、content-hash.ts）で、GitHub への
- * push は同期時（M5）のみ。定時同期は meta.treeSha と GitHub のツリー sha を
- * 比較して差分を取る。
+ * R2上のVault実体ストレージ。ツリーとノート本文を保持し、読み取りはR2を優先する。
+ * metaの有無が「R2が正」の条件で、なければGitHubへ直行する。保存後のshaは
+ * コンテンツハッシュで付与し、破損は1件ずつ読み飛ばす。meta・tree・notesでキーを分ける。
+ * 書き込みは同期・遅延キャッシュ・保存が行い、GitHubへのpushは同期時のみ行う。
  */
 
 import {

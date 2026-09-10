@@ -25,12 +25,7 @@ export function isNotePath(path: string): boolean {
   return path.endsWith('.md');
 }
 
-/**
- * 本文の Git blob sha（SHA-1 of "blob {len}\0{content}"）を 16 進で返す。
- * GitHub の Trees/Blobs API が返す sha と同じ値になる。同期の「同一判定」は
- * この値と GitHub ツリーの sha を照合することで、R2 に保存由来の SHA-256 が
- * 混在しても本文ベースで比較できる（M4 の unresolvedIssues への対処）。
- */
+/** 本文のgit blob shaを返す。同期の同一判定に使う。 */
 export async function gitBlobShaHex(content: Uint8Array): Promise<string> {
   const header = new TextEncoder().encode(`blob ${content.byteLength}\0`);
   const combined = new Uint8Array(header.byteLength + content.byteLength);
@@ -48,15 +43,7 @@ async function isLocalSavedSha(content: string, sha: string): Promise<boolean> {
 /** Blob 並列取得の同時実行上限（GitHub のレートリミット消費を抑える） */
 const BLOB_FETCH_CONCURRENCY = 8;
 
-/**
- * 1 リクエストで取得する blob 数の上限（同期プルのチャンク化。2026-08-16 の事故後）。
- *
- * Cloudflare Workers Free プランの外部 fetch サブリクエスト制限（50 件/リクエスト）
- * を超過しないための安全値。1 リクエストは「ツリー取得 + blob 取得 + 衝突 remote 取得」
- * を行うため、blob 側を 40 件に抑えて合計 50 件未満に収める。大量の差分がある
- * Vault は 1 リクエストでは処理しきらず、`status: 'syncing'` を返して呼び出し側が
- * 再実行する（冪等なため再実行で自然に続きが消化される）。
- */
+/** 1回で取得するblob上限。枠超え防止に40件で残りは次回に回す。 */
 const SYNC_FETCH_LIMIT = 40;
 
 /** 同期衝突（プル時に GitHub 側の変更と R2 側の未 push 変更が重なった Note） */

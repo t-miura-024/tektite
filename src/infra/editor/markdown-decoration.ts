@@ -1,17 +1,8 @@
 /**
- * CM6 のライブプレビュー装飾（decoration）。
- *
- * domain 層の Markdown 構文解析（src/domain/markdown/parse）の結果を
- * CM6 の DecorationSet に変換する。ドキュメントが変更されるたびに再解析し、
- * 見出し・強調・コード・リスト・引用・リンク・水平線などをインライン装飾する。
- *
- * 編集は常にソーステキストに対して行われる（WYSIWYG の DOM 変換はしない）。
- * タスクリストの `[ ]` / `[x]` は replace decoration でチェックボックス表示に
- * 差し替えるが、ソーステキスト自体は変わらない。
- *
- * 装飾クラスは tk- プレフィックスを使い、アプリの CSS 変数（--color-*）に
- * 追従させる（ダークモードでも整合する）。スタイルは markdown-decoration-theme、
- * フロントマテリア領域は frontmatter-decoration が担う。
+ * CM6 のライブプレビュー装飾。domain の Markdown 解析結果を DecorationSet に変換し、
+ * 文書変更時に再解析して見出しや強調などを付与する。編集は常にソーステキストが対象で
+ * DOM 変換はしない。タスク記法は置換装飾で見た目だけ差し替え、tk- 接頭辞のクラスで
+ * CSS 変数に追従する。領域分担は別モジュールが担う。
  */
 
 import { RangeSetBuilder, StateField, type Text } from '@codemirror/state';

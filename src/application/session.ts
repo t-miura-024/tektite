@@ -1,14 +1,7 @@
 /**
- * セッション系ユースケース（M2: 認証とセッション）。
- *
- * ログイン状態の確認とログアウトを進行させる。セッションの実体は
- * 暗号化 Cookie（ADR-0002）であり、この層はポート（SessionGateway）経由で
- * だけ永続化に触れる。実装は src/infra/auth（Pages Functions プロキシ呼び出し）。
- *
- * 依存性逆転の仕組みとして Effect の Service（Tag）を採用する:
- * ポートはこの層で Effect Service として定義し、具体実装（Layer）は src/infra が、
- * 組成（Layer の組み立てと実行）は src/composition が担う。UI 層は infra を
- * import しない（.oxlintrc.json で機械的に検査される）。
+ * セッション系ユースケース（M2: 認証）。
+ * 確認とログアウトを進める。永続化はSessionGateway経由のみ。
+ * 実装はsrc/infra、組成はsrc/compositionが担う。
  */
 
 import { Context, Effect } from 'effect';

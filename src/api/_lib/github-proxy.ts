@@ -1,17 +1,8 @@
 /**
- * GitHub API プロキシ系 Functions（Vault 一覧 / ファイルツリー）の共通基盤。
- *
- * - 認証: M2 の暗号化 Cookie（functions/api/auth/_lib/session）を再利用し、
- *   リクエストからアクセストークンを復号する。トークンは Workers 側のみ保持。
- * - PAT モード: `TEKTITE_PAT_AUTH === 'true'` かつ `GITHUB_PERSONAL_TOKEN` が
- *   設定されたローカル専用フォールバック。有効時はセッション Cookie を一切
- *   読まず（PAT 優先）、OAuth 4 変数を必要としない。
- * - GitHub API 呼び出し: ヘッダー規約を統一した fetch ヘルパーを使う。
- * - エラー envelope: GitHub の失敗応答を UI が扱いやすい形に変換する
- *   （401 → unauthenticated / 403・429 → rate_limited / 404 → not_found / その他 → 502）。
- *
- * 環境変数のテストシーム（GITHUB_API_BASE_URL）は M2 と同じ仕組みで、
- * E2E ではローカルのモック GitHub サーバーに差し替えられる。
+ * GitHub APIプロキシの共通基盤。認証はPAT優先で、なければ暗号化Cookieから復号する。
+ * 設定解決はOAuthとPATの二方式に対応し、テスト用にベースURLを差し替えできる。
+ * 呼び出し用fetchでヘッダー規約を統一し、失敗はUI向けenvelopeに変換する。
+ * 401は未認証、403・429はレート制限、404は未検出として返す。
  */
 
 import { clearSessionCookie, readAccessToken } from '@/api/_lib/session';

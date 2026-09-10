@@ -1,20 +1,8 @@
 /**
- * R2 上のローカル変更マーカー（tombstone / dirty）。
- *
- * - `vaults/{owner}/{repo}/deleted/{path}` … ローカル削除の tombstone（空マーカー）。
- *   同期済み Vault でファイル操作（files 一括コミットの delete / move）が削除を
- *   行ったときに記録される。R2 とツリーキャッシュの両方から消えたパスは
- *   「ローカル削除」か「GitHub 側新規追加」のどちらの可能性もあるため、
- *   同期（vault-sync.ts）はこのマーカーで区別する:
- *   - プル: tombstone があるパスは fetch しない（削除の巻き戻り防止）
- *   - プッシュ: tombstone があるパスは GitHub ツリーから削除する（削除の反映）
- *   同期の完了（衝突なし）でクリアされる
- * - `vaults/{owner}/{repo}/dirty/{path}` … 未プッシュ変更のマーカー。
- *   保存やファイル操作が R2 を書き換えたときに記録し、同期プッシュが
- *   「どのノートを GitHub へ反映すべきか」を全ノートの本文を読まずに
- *   特定するために使う（Workers Free のサブリクエスト / CPU 制限への対応）。
- *
- * キー設計と全体像は r2-vault.ts のドキュメントを参照。
+ * R2上のローカル変更マーカー。削除のtombstoneと未プッシュのdirtyを保持する。
+ * 保存やファイル操作の書き換え時に記録し、本文を読まず空マーカーで差分を特定する。
+ * プル時はtombstoneのあるパスを復活させず、プッシュ時は削除反映とdirty差分に使う。
+ * 同期の完了（衝突なし）でクリアされる。キー設計の全体像はr2-vault.ts参照。
  */
 
 import { listAllR2Keys } from '@/api/_lib/r2-list';
@@ -24,16 +12,7 @@ export function vaultDeletedKey(owner: string, repo: string, path: string): stri
   return `vaults/${owner}/${repo}/deleted/${path}`;
 }
 
-/**
- * ローカル削除の tombstone を記録する（M4 の files 一括コミットの delete / move
- * が削除したパスに対して呼ぶ）。
- *
- * R2 のノート/添付とツリーキャッシュの両方から消えたパスは、次回同期のプルで
- * 「GitHub ツリーにあり R2 に無い」状態になり、無条件 fetch だと削除が巻き戻る。
- * tombstone はこのパスが「ローカル削除（push 待ち）」であることを記録し、
- * 同期（vault-sync.ts）のプルで fetch を抑止し、プッシュで GitHub ツリーから
- * 削除する材料になる（完了後にクリアされる）。
- */
+/** 削除tombstoneを記録する。同期の巻き戻り防止に使う。 */
 export async function markVaultDeleted(
   bucket: R2Bucket,
   owner: string,

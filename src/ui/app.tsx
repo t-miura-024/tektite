@@ -1,18 +1,8 @@
 /**
- * アプリのシェル。セッション状態（M2）と URL ルーティング（M3）に応じて
- * 画面を切り替える。
- *
- * - 未ログイン      → LoginScreen（GitHub OAuth へ）
- * - ログイン済み    → ルートに応じて Vault 選択 / ファイルツリー / ノートパス
- * - 確認失敗        → エラー表示 + リトライ（エラー UX 基本方針）
- *
- * パスベースディープリンク（/:owner/:repo/blob/:path 系）に対応し、
- * リロードしても URL から状態を復元する（useRoute / parseRoute 参照）。
- *
- * OAuth コールバック後の `?error=<code>` はトーストで知らせ、URL から取り除く。
- *
- * ユースケースの実行はすべて組成ルート（src/composition）の run() 経由で行う。
- * UI 層は infra 層を import しない（依存の向きは src/composition.ts 参照）。
+ * アプリのシェル。セッション状態と URL ルーティングに応じて画面を切り替える。未ログインは
+ * ログイン画面、ログイン済みはルート別の Vault 選択やツリー表示とし、確認失敗は再試行付きで
+ * 示す。深いリンクは再読込で復元し、OAuth コールバックのエラーはトーストで知らせて URL から
+ * 除去する。実行は組成ルート経由とする。
  */
 
 import { useCallback, useEffect, useState, type JSX } from 'react';

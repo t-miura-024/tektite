@@ -1,18 +1,7 @@
 /**
- * ノート索引（M4: クライアント側ノート索引）。
- *
- * Vault の全ノートを一括取得し、ブラウザのメモリ上に展開して共有する。
- * 検索（M2）・クイックスイッチャー（M3）・バックリンク（M3 の buildNotationIndex）
- * が同一インスタンスを参照するための基盤。M3 まで VaultScreen が持っていた
- * ノート本文キャッシュ（contentsCacheRef）を application 層へ昇格させたもの。
- *
- * レジストリ（NoteIndexRegistry）は Vault（owner/name）単位で索引を保持し、
- * 同じ Vault の再ロード（ルーティング往来・リマウント）では再取得しない
- * （GitHub レートリミットの節約）。ページリロードでメモリが消えるため再取得
- * される（ADR-0004 の「メモリ展開」前提と整合）。
- *
- * 保存後の最新化は applySaved が担う。本文のみ更新し、sha は取得時点の値を
- * 保持する（楽観ロックの基準 sha は NotePane が読込時とは別に管理している）。
+ * ノート索引（M4: 全ノートの共有メモリ索引）。
+ * Vault全ノートを一括取得してメモリ展開し、検索・クイックスイッチャー・バックリンクで共用する基盤。
+ * Vault単位で保持し再ロード時は再取得しない。保存後はapplySavedで本文を最新化し、ファイル操作後はapplyFileChangesで反映する。
  */
 
 import { Context, Effect, Layer } from 'effect';

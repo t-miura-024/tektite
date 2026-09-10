@@ -1,14 +1,7 @@
 /**
  * CodeMirror 6 エディタのセットアップ。
- *
- * 基本セットアップ（編集可能・行番号・折り返し・履歴）に、ライブプレビュー装飾
- * （markdownDecoration / markdownDecorationTheme）を組み込む。装飾は
- * src/domain/markdown の構文解析 + 自前の StateField によるインライン装飾で
- * 実現する（WYSIWYG の DOM 変換はしない。ソーステキストのまま編集できる）。
- *
- * 依存の向きの都合上、UI 層（src/ui）は infra を直接 import できない
- * （.oxlintrc.json で機械検査）。このモジュールは src/composition 経由で
- * UI に公開され、UI は opaque な EditorHandle だけを扱う（CM6 の型に触れない）。
+ * 基本機能にライブプレビュー装飾を組み込む（ソース編集のまま装飾する）。
+ * UI 層は infra を直接 import せず、src/composition 経由で EditorHandle を使う。
  */
 
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';

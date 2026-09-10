@@ -1,20 +1,8 @@
 /**
- * ライブプレビュー記法装飾（WikiLink / Embed / Tag）。
- *
- * domain 層の Obsidian 記法パーサー（src/domain/notation/parse）の結果
- * （from/to オフセット）を CM6 の DecorationSet に変換する。既存の Markdown
- * 装飾（src/infra/editor/markdown-decoration）とは独立した StateField として
- * 供給され、両者が同じドキュメント上で共存する。
- *
- * - WikiLink: `[[ノート]]` / `[[ノート|表示名]]` / `[[ノート#見出し]]`
- *   リンク色で装飾し、解決できないターゲット（壊れリンク）は赤系にする。
- *   クリック遷移は src/infra/editor/editor のクリックハンドラが担う
- * - Embed: `![[...]]` を muted 色で装飾する（画像 / ノート共通。壊れは赤系）
- * - Tag: インライン `#タグ` / `#area/project` をピル型で装飾する
- *
- * 装飾クラスは tk- プレフィックスを使い、アプリの CSS 変数（--color-*）に
- * 追従させる。フロントマテリア領域とコードフェンス内はパーサーが対象外に
- * しているため、ここでも装飾されない。
+ * WikiLink / Embed / Tag の記法装飾。domain パーサーの結果を DecorationSet に変換する
+ * 独立した StateField で、Markdown 装飾と共存する。壊れリンクと壊れ埋め込みは赤系、
+ * Tag はピル型で示す。tk- 接頭辞で CSS 変数に追従し、対象外領域は装飾しない。
+ * 遷移は editor が担う。
  */
 
 import { RangeSetBuilder, StateField, type Extension, type Text } from '@codemirror/state';

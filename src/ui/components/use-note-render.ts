@@ -1,13 +1,6 @@
 /**
- * ノート本文 → HTML のレンダリング状態を担うフック。
- *
- * レンダリングパイプライン（src/infra/render）は UI から直接 import できない
- * 規約のため、組成ルート（src/composition）経由で呼ぶ。パイプラインが返す
- * HTML はサニタイズ前に DOM へ注入しない（sanitizeHtml を必ず通す）。
- *
- * - 埋め込み（![[ノート]]）: 対象ノートを application の openNote で取得し、
- *   collectEmbedContents が幅優先で収集してから一括レンダリングする
- * - 壊れリンク / 壊れ埋め込み: パイプラインが専用クラスを付与する（CSS 側）
+ * ノート本文から HTML を作るフック。生成は組成ルート経由で呼ぶ。
+ * HTML はサニタイズしてから DOM に入れる。埋め込みは幅優先で収集する。
  */
 
 import { useCallback, useState } from 'react';

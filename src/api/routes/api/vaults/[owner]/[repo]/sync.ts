@@ -1,33 +1,8 @@
 /**
- * Vault 同期: POST|GET /api/vaults/:owner/:repo/sync, POST .../sync/resolve
- *
- * - POST .../sync（初期同期 / 明示同期。完了条件 2 / 5）:
- *   - R2 に同期済みメタが無い Vault は GitHub から全量を取り込む（初期同期）。
- *     認可確認済み（write 権限）のリポジトリのみ実行される
- *   - メタがある Vault は差分同期（M5）を実行する。ツリー sha 比較でプル
- *     （変更 blob のみ取得）し、未反映の変更を 1 コミットに束ねてプッシュする。
- *     同期衝突（GitHub 側変更 + R2 側ローカル保存）は保留して conflicts として
- *     返し、UI（Conflict UI 拡張）が上書き/取り込みで解決する
- * - GET .../sync: 同期状態（最終同期時刻・失敗マーク）を返す（完了条件 10）
- * - POST .../sync/resolve: 同期衝突の解決（overwrite: GitHub 側採用 /
- *   adopt: ローカル側採用。完了条件 6）
- *
- * 取り込み内容（初期同期）:
- * 1. デフォルトブランチの解決（リポジトリ情報）
- * 2. ツリー全体（Git Trees API recursive=1）から Markdown blob の path + sha を抽出
- * 3. Markdown blob を同時 8 件ずつ取得し、R2 の `notes/{path}` へ書き込む
- * 4. ツリーを R2 の `tree` へ、完了マーカーを `meta` へ書き込む
- *
- * 応答:
- * - パラメータ不正                  → 400 { error: 'invalid_vault_ref' }
- * - 未ログイン                      → 401 { error: 'unauthenticated' }
- * - write 権限なし（初期同期）      → 403 { error: 'read_only_vault' }
- * - Vault（リポジトリ）が見つからない → 404 { error: 'not_found' }
- * - レートリミット（403 / 429）     → 429 { error: 'rate_limited' }
- * - R2 バインディングなし           → 503 { error: 'storage_unavailable' }
- * - 正常（初回）                    → 200 { status: 'initialized', notes }
- * - 正常（差分同期）                → 200 { status: 'synced', pulled, pushed, conflicts }
- * - 同期状態（GET）                 → 200 { syncedAt, lastSyncError, lastFailedAt }
+ * Vault同期。POSTは初回なら全量取込、同期済みなら差分のプルとプッシュを行う。
+ * プルはツリーsha比較で変更blobのみ取得し、プッシュは未反映分を1コミットに束ねる。
+ * GETはR2のmetaから最終同期時刻と失敗マークを返す。GitHub APIは消費しない。
+ * 衝突はconflictsとして返し、解決はsync/resolveがoverwrite・adoptで担う。
  */
 
 import { createRoute } from 'honox/factory';

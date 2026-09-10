@@ -1,23 +1,8 @@
 /**
- * 同期衝突の解決: POST /api/vaults/:owner/:repo/sync/resolve
- *
- * 明示同期で保留された同期衝突（プル時に GitHub 側の変更と R2 側のローカル
- * 保存が同一 Note で重なった状態）を解決する（完了条件 6。既存 Conflict UI の
- * 上書き/取り込みに対応する）。
- *
- * body: `{ path: "<ノートパス>", resolution: "overwrite" | "adopt" }`
- * - overwrite: GitHub 側の内容を採用する。R2 のノートを GitHub の現在内容で
- *   更新し、GitHub 側で削除されたノートは R2 から削除する
- * - adopt: ローカル側の内容を採用する。R2 のローカル内容を GitHub へ
- *   1 コミットで反映する（次の同期で同一判定になり、衝突が解消する）
- *
- * 応答:
- * - パラメータ不正 / ボディ不正  → 400 { error: 'invalid_vault_ref' | 'invalid_body' }
- * - 未ログイン                  → 401 { error: 'unauthenticated' }
- * - ノートが見つからない        → 404 { error: 'not_found' }
- * - レートリミット（403 / 429） → 429 { error: 'rate_limited' }
- * - R2 バインディングなし       → 503 { error: 'storage_unavailable' }
- * - 正常                        → 200 { owner, name, path, resolution }
+ * 同期衝突の解決。overwriteはGitHub側、adoptはローカル側の内容を採用する。
+ * 明示同期で保留された同一ノートの重なりを対象とし、初期同期前のVaultは409で防衛する。
+ * overwriteはR2をGitHubの現在内容で更新し、adoptはR2内容をGitHubへ1コミットで反映する。
+ * 結果はowner・name・path・resolutionとshaで返す。
  */
 
 import { createRoute } from 'honox/factory';

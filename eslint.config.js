@@ -38,6 +38,7 @@ export default tseslint.config(
     },
     rules: {
       'local/no-single-use-private-function': 'error',
+      'local/no-long-comment-block': 'error',
       // oxlint でカバー済みの構文ベースルールは eslint 側で off（重複回避）
       'no-console': 'off',
       eqeqeq: 'off',
@@ -144,6 +145,7 @@ export default tseslint.config(
   {
     files: ['playwright.config.ts', 'vite.config.ts'],
     rules: {
+      'local/no-long-comment-block': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
     },
@@ -152,6 +154,7 @@ export default tseslint.config(
     files: ['**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}', 'features/**/*.ts'],
     rules: {
       'local/no-single-use-private-function': 'off',
+      'local/no-long-comment-block': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off',

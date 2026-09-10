@@ -1,18 +1,7 @@
 /**
- * SPA ルーティング（History API ベース、ルーターライブラリ不使用）。
- *
- * URL 構造（パスベースディープリンク。リロードで状態を復元する）:
- * - `/`                        … Vault 選択画面
- * - `/:owner/:repo`            … Vault 内ファイルツリー
- * - `/:owner/:repo/blob/:path` … ノートパス（表示は次計画。ここではルーティング構造のみ）
- * - その他                     … 404 画面（アプリ内のルート解決ができない場合）
- *
- * SPA フォールバック: Cloudflare Pages はアセットにマッチしないパスに対して
- * index.html を 200 で返す（プラットフォーム標準の挙動）。そのため
- * _redirects や catch-all Function は不要で、ディープリンクをリロードしても
- * このルーターが URL から状態を復元できる。
- * （`/* /index.html 200` のような _redirects ルールは、Pages の html 正規化と
- * 組み合わさって無限ループになるため Pages 側で無視される。使ってはならない。）
+ * SPA ルーティング。History API で Vault 選択とツリーとノートパスを解決し、対応しないパスは
+ * 404 にする。Cloudflare Pages の SPA フォールバックを前提に URL から状態を復元するため、
+ * _redirects などの追加設定は不要で用いない。純粋なパス解決と遷移通知を担う。
  */
 
 import { useEffect, useState } from 'react';

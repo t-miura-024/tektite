@@ -1,11 +1,11 @@
 /**
  * Local ESLint plugin for tektite.
- * Rule: no-single-use-private-function
- *
- * - 対象: export されていないモジュール内関数（トップレベル/ネスト問わず、FunctionDeclaration / const foo = () => / function式）のうち、同一スコープ内で1回だけ参照されるもの
- * - 除外: 再帰（自己参照を含む）、exportされたもの、PascalCase/use*（Reactコンポーネント/hooks）
- * - スコープ: 全スコープ（module, function, block）
+ * Rules: no-single-use-private-function, no-long-comment-block.
  */
+
+const HEAD_MAX = 400;
+const BODY_MAX = 200;
+const TRAILING_MAX = 50;
 
 /**
  * @param {import('eslint').Rule.RuleContext} context
@@ -176,6 +176,105 @@ function isNodeInside(child, parent) {
   return child.range[0] >= parent.range[0] && child.range[1] <= parent.range[1];
 }
 
+const DIRECTIVE_HINTS = ['eslint-', '@ts-', 'c8', 'istanbul', 'prettier', 'oxlint'];
+
+function isDirectiveLine(line) {
+  const lower = line.toLowerCase();
+  return DIRECTIVE_HINTS.some((hint) => lower.includes(hint));
+}
+
+function extractBodyLength(comment) {
+  const rawLines = comment.type === 'Line' ? [comment.value] : String(comment.value).split(/\r?\n/);
+  let total = 0;
+  for (let raw of rawLines) {
+    let line = raw.trim();
+    if (comment.type === 'Block') {
+      line = line.replace(/^\* ?/, '').trim();
+    }
+    if (line === '' || isDirectiveLine(line)) {
+      continue;
+    }
+    total += Array.from(line).length;
+  }
+  return total;
+}
+
+function isTrailingComment(comment, lines) {
+  const startLine = lines[comment.loc.start.line - 1] ?? '';
+  const prefix = startLine.slice(0, comment.loc.start.column);
+  if (prefix.trim() !== '') {
+    return true;
+  }
+  const endLine = lines[comment.loc.end.line - 1] ?? '';
+  const suffix = endLine.slice(comment.loc.end.column);
+  return suffix.trim() !== '';
+}
+
+function createNoLongCommentBlock(context) {
+  const sourceCode = context.sourceCode;
+  return {
+    'Program:exit'(programNode) {
+      const comments = sourceCode.getAllComments();
+      if (comments.length === 0) {
+        return;
+      }
+      const sorted = [...comments].sort((a, b) => a.range[0] - b.range[0]);
+      const text = sourceCode.text ?? sourceCode.getText();
+      const lines = sourceCode.lines ?? text.split(/\r?\n/);
+      const trailingFlags = sorted.map((comment) => isTrailingComment(comment, lines));
+
+      const blocks = [];
+      const blockIsTrailing = [];
+      for (let index = 0; index < sorted.length; index += 1) {
+        const comment = sorted[index];
+        const trailing = trailingFlags[index];
+        const lastBlock = blocks[blocks.length - 1];
+        if (!lastBlock || trailing || blockIsTrailing[blocks.length - 1]) {
+          blocks.push([comment]);
+          blockIsTrailing.push(trailing);
+          continue;
+        }
+        const prev = lastBlock[lastBlock.length - 1];
+        if (prev.loc.end.line + 1 < comment.loc.start.line) {
+          blocks.push([comment]);
+          blockIsTrailing.push(false);
+          continue;
+        }
+        const between = text.slice(prev.range[1], comment.range[0]);
+        if (between.trim() !== '') {
+          blocks.push([comment]);
+          blockIsTrailing.push(false);
+          continue;
+        }
+        lastBlock.push(comment);
+      }
+
+      const firstBody = programNode.body[0];
+      const firstCodeStart = firstBody ? firstBody.range[0] : Number.POSITIVE_INFINITY;
+
+      blocks.forEach((block) => {
+        const last = block[block.length - 1];
+        const isHeader = last.range[1] <= firstCodeStart;
+        const isTrailing = block.length === 1 && isTrailingComment(block[0], lines);
+        const max = isHeader ? HEAD_MAX : isTrailing ? TRAILING_MAX : BODY_MAX;
+        const kind = isHeader ? 'Header' : isTrailing ? 'Trailing' : 'Block';
+        let actual = 0;
+        for (const comment of block) {
+          actual += extractBodyLength(comment);
+        }
+        if (actual <= max) {
+          return;
+        }
+        context.report({
+          node: last,
+          messageId: 'tooLong',
+          data: { kind, actual: String(actual), max: String(max) },
+        });
+      });
+    },
+  };
+}
+
 const plugin = {
   rules: {
     'no-single-use-private-function': {
@@ -191,6 +290,19 @@ const plugin = {
         },
       },
       create: createNoSingleUsePrivateFunction,
+    },
+    'no-long-comment-block': {
+      meta: {
+        type: 'suggestion',
+        docs: {
+          description: 'limit comment block length - header 400, body 200, trailing 50',
+        },
+        schema: [],
+        messages: {
+          tooLong: '{{kind}} comment is {{actual}} chars (max {{max}}). Shorten it.',
+        },
+      },
+      create: createNoLongCommentBlock,
     },
   },
 };

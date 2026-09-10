@@ -1,20 +1,8 @@
 /**
- * CM6 エディタの React ラッパー。
- *
- * infra 層の createEditorView は UI から直接 import できない規約のため、
- * 組成ルート（src/composition）経由で生成する。エディタの実体は
- * opaque な EditorHandle として扱い、React はライフサイクル（生成/破棄）と
- * イベントの橋渡し（本文変更・フォーカス喪失・ハンドルの受け渡し）だけを担う。
- *
- * - onContentChange: 本文が変わるたびに呼ばれる（未保存判定・Draft 退避用）
- * - onBlur: エディタからフォーカスが離れるたびに呼ばれる（自動保存トリガー）
- * - onReady: エディタ生成/破棄時に呼ばれる（setContent 用のハンドル保持）
- * - onUploadImage: 画像のペースト/ドロップ時に呼ばれる（M2 画像アップロード）
- *
- * notePath が変わると親が key を付けて作り直す想定（ノート切替時に確実に
- * 新ドキュメントで再生成される）。StrictMode の二重実行にも破棄処理で対応する。
- * filePaths の変更では再生成せず updateFilePaths で装飾を更新する（再生成すると
- * 編集中の本文が初期内容へ巻き戻るため。M2 の画像アップロード後ツリー再読込時）。
+ * CM6 エディタの React ラッパー。生成は組成ルート経由で行い、実体は不透明なハンドルとして
+ * 扱う。React は生成と破棄、変更・フォーカス・ハンドル受け渡しの橋渡しだけを担う。UI から
+ * infra を直接触らず、ノート切替時は親の key で作り直す。filePaths 変更は再生成せず更新して
+ * 巻き戻りを防ぐ。
  */
 
 import { useEffect, useRef, type JSX } from 'react';
