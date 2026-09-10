@@ -1,13 +1,7 @@
 /**
  * Draft ストレージの localStorage 実装（Effect Layer）。
- *
- * キーは `draft:<owner>/<repo>:<path>` 形式（例: draft:octocat/notes:daily/2026-08-08.md）。
- * 値は本文（UTF-8 文字列）そのままを保存する。
- *
- * localStorage はブラウザ専用のため、テストでは createDraftStoreLive に
- * インメモリの KeyValueStorage を渡して検証する。本番（DraftStoreLive）は
- * localStorage を遅延解決し、利用できない環境（プライベートモードや非ブラウザ）
- * では DraftStoreError('unavailable') で失敗させる。
+ * キーは `draft:<owner>/<repo>:<path>`、値は本文そのまま。
+ * 非ブラウザ環境では unavailable で失敗させる。
  */
 
 import { Effect, Layer } from 'effect';

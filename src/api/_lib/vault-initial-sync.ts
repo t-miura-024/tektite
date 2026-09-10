@@ -12,15 +12,7 @@ import { parseTreeBody, type GithubTreeResponse } from '@/api/_lib/vault-sync-tr
 /** Markdown blob 並列取得の同時実行上限（GitHub のレートリミット消費を抑える） */
 const BLOB_FETCH_CONCURRENCY = 8;
 
-/**
- * 1 リクエストで取得する blob 数の上限（同期のチャンク化。2026-08-16 の事故後）。
- *
- * Cloudflare Workers Free プランの外部 fetch サブリクエスト制限（50 件/リクエスト）
- * を超過しないための安全値。1 リクエストは「ツリー取得 + repo 取得 + blob 取得」を
- * 行うため、blob 側を 40 件に抑えても合計 42 件程度になる。大量のノートがある
- * Vault は 1 リクエストで全量を取得せず、レスポンスの `remaining` を見て
- * クライアントが複数リクエストに分割して取得する。
- */
+/** 1回で取得するblob上限。枠超え防止に40件で残りは次回に回す。 */
 const SYNC_FETCH_LIMIT = 40;
 
 type InitialSyncContext = {

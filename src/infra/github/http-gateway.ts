@@ -1,20 +1,8 @@
 /**
- * Vault / ノートゲートウェイのブラウザ実装（Effect Layer）:
- * Pages Functions のプロキシエンドポイントを呼ぶ。
- *
- * - GET /api/vaults                          … Vault 候補一覧（functions/api/vaults）
- * - GET /api/tree/:owner/:repo               … ファイルツリー（functions/api/tree）
- * - GET /api/notes/:owner/:repo/blob/:path   … ノート本文 + sha（functions/api/notes）
- * - PUT /api/notes/:owner/:repo/blob/:path   … ノート保存（sha 楽観ロック）（functions/api/notes）
- *   （path は / 区切りを 1 セグメントにエンコードして渡す）
- *
- * GitHub トークンは Workers 側のみ保持（ADR-0002）のため、ブラウザは
- * 暗号化 Cookie を意識せずプロキシの JSON 応答だけを読む。ブラウザから
- * api.github.com を直接呼ぶことはない（方針: Functions プロキシ経由に集約）。
- *
- * application 層が定義する VaultGateway / NoteGateway（Effect Service）の
- * 具体実装を Layer として提供する。応答のパースは response-parser、
- * HTTP 通信は proxy-request が担う。組成（UI への注入）は src/composition が担う。
+ * Vault / ノートゲートウェイのブラウザ実装（Effect Layer）。Pages Functions のプロキシ
+ * 経由で呼び、トークンは Workers 側保持のためブラウザは JSON 応答だけを読む。GitHub
+ * 直呼びはしない。VaultGateway / NoteGateway の具体実装を Layer として提供し、
+ * 応答パースと通信は別モジュール、組成は composition が担う。
  */
 
 import { Effect, Layer } from 'effect';

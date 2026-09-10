@@ -1,23 +1,8 @@
 /**
- * ファイル操作ユースケース（M5: ノート/ディレクトリの作成・リネーム・移動・削除）。
- *
- * UI の操作（FileOperation）を、リンク張り替え（src/domain/notation/rewrite）と
- * 一括コミット（NoteGateway.commitChanges → functions/api/files）に変換して実行する。
- * 変更列の組み立てと検証は src/application/file-changes が担う。
- *
- * 方針:
- * - リネーム/移動は必ず「移動 + リンク張り替え + 影響ノート更新」を 1 コミットに
- *   束ねる（計画方針 2: Git Trees/Blobs API で単一コミット。逐次コミットしない）
- * - 削除は GitHub 上の実削除（確認ダイアログは UI が挟む。ゴミ箱は作らない）
- * - ディレクトリ操作は配下の全ファイル（添付含む）へ展開する。ディレクトリ作成は
- *   GitHub が空ディレクトリを保持できないため `.gitkeep` を作る
- * - リンク張り替えの入力は共有索引（NoteIndexRegistry）の本文と、UI が持つ
- *   ファイルツリーの全パス（filePaths）を使う
- * - 画像アップロード（uploadImage）も一括コミット基盤を再利用する（M2）。
- *   バイナリは UTF-8 テキストと別系統（create-binary）で base64 のまま渡す
- *
- * エラー: 検証（パス重複など）とコミット失敗は FileCommitError、
- * 索引の読み込み失敗は NoteFetchError で返る（UI は既存のエラー変換を再利用する）。
+ * ファイル操作ユースケース（M5: 作成・リネーム・移動・削除）。
+ * UI操作をリンク張り替え込みの一括コミットに変換して実行する。変更列の組み立ては file-changes が担う。
+ * リネーム/移動は1コミットに束ね、画像アップロードも同基盤を使う。
+ * 検証・コミット失敗は FileCommitError、索引失敗は NoteFetchError で返す。
  */
 
 import { Effect } from 'effect';

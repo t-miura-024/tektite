@@ -169,14 +169,7 @@ function notifyProgress(
 }
 
 /**
- * Vault の初期同期を実行する（GitHub → R2 の全量取り込み）。
- * R2 に同期済みメタがある場合はサーバーが即座に完了を返すため、
- * Vault を開くたびに呼んでも GitHub API は消費しない（初回のみ消費）。
- *
- * 大量ノートの Vault ではサーバーが 1 リクエスト 40 件ずつしか取り込めない
- * （Workers Free のサブリクエスト制限への対応）ため、status が 'syncing' の間
- * 同じ呼び出しを繰り返す（サーバー側の処理は冪等で、既取得分は自動スキップされる）。
- * 各反復の進捗は onProgress で通知される。
+ * Vaultの初期同期を実行する。同期済みなら即完了する。syncing間は再呼出しする。
  */
 export const initializeVault = (
   ref: VaultRef,
@@ -203,14 +196,7 @@ export const initializeVault = (
   });
 
 /**
- * Vault の明示同期を実行する（M5。完了条件 5）。
- * ツリー sha 比較でプルし、未反映の変更を 1 コミットに束ねてプッシュする。
- * 同期衝突が検出された場合は結果の conflicts に含まれ、UI が
- * resolveSyncConflict で解決する。
- *
- * 大量の差分がある Vault ではサーバーが 1 リクエスト 40 件ずつしか処理できない
- * ため、status が 'syncing' の間同じ呼び出しを繰り返す（冪等）。
- * 各反復の進捗は onProgress で通知される。
+ * Vaultの明示同期を実行する（M5）。衝突はconflictsに含めUIが解決する。
  */
 export const syncVault = (
   ref: VaultRef,

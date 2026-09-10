@@ -1,17 +1,8 @@
 /**
- * リーディング表示のレンダリングパイプライン（Markdown → HTML）。
- *
- * domain 記法解析を再利用し、WikiLink / Embed（画像・本文再帰展開）/ Tag /
- * 数式（KaTeX）/ コールアウト / タスクリスト / コードハイライト /
- * 見出しスラグ id を 1 本のパイプラインで変換する。
- *
- * 記法スパンはプレースホルダー（私用領域の文字）に置き換えてから Markdown
- * パースし、完了後に実 HTML へ置換することで、Markdown パーサーが生成した
- * 構造を崩さずに注入する（ブロック要素は <p> を外して注入）。
- * 出力はサニタイズ前の HTML のため、DOM 注入前に必ず sanitizeHtml
- * （src/infra/render/sanitize）を通すこと。
- *
- * コードの一時マスクは code-mask、Marked セットアップは marked-setup が担う。
+ * リーディング表示のレンダリング（Markdown → HTML）。WikiLink / Embed 再帰展開 /
+ * Tag / 数式などを一本のパイプラインで変換する。記法スパンを私用領域プレースホルダーに
+ * 置き換えてから変換し、構造を崩さず実 HTML を注入する。出力はサニタイズ前のため
+ * sanitizeHtml を通すこと。
  */
 
 import { noteDisplayName } from '@/application/note-name';

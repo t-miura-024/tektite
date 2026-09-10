@@ -1,10 +1,5 @@
 /**
- * オーバーレイパネル（role="dialog"）のフォーカストラップ（M4 修正）。
- *
- * Tab / Shift+Tab キーでパネル内のフォーカス可能要素間を循環させ、背景
- * （ツリー・エディタ）へフォーカスが抜けるのを防ぐ。Esc・矢印・Enter の
- * ハンドリングは各パネル（SearchPanel / QuickSwitcher）が担い、ここでは
- * Tab のみを処理する。aria-modal="true" は各パネルが指定する。
+ * オーバーレイパネルのフォーカストラップ。Tab で panel 内を循環させる。
  */
 
 import { useEffect, type RefObject } from 'react';

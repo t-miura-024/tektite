@@ -1,18 +1,8 @@
 /**
- * GitHub への一括コミット（Git Blobs → Trees → Commits → refs の流れ）。
- *
- * M4 で書き込み経路が R2 先行化された後も、同期（M5 の定時/明示同期）の
- * push はこのフローを再利用する（計画方針 4: 同期の push は既存の commit
- * フローを再利用する）。一括コミット API（POST /api/files/:owner/:repo/commit）
- * は未同期（R2 メタなし）Vault に対してこのフローで GitHub へ直接コミットする。
- *
- * 流れ（すべてデフォルトブランチに対して）:
- * リポジトリ情報 → ref / Trees API の状態読み取り（github-commit-state）→
- * 差分エントリ組み立て + Blob 作成（github-commit-delta）→ 新規 Tree 作成 →
- * Commit 作成 → ref 更新（force: false）。ref 更新が 409 の場合は楽観ロック競合として
- * `{ error: 'conflict' }` を返す。空リポジトリは parents 無し・base_tree 無しの
- * 初回コミットとして扱い、ref 更新（PATCH）が 404 のため POST /git/refs で
- * ブランチ参照を新規作成する。
+ * GitHubへの一括コミット（Blobs→Trees→Commits→refsの順に適用）。
+ * 同期のpushと未同期Vaultの直接コミットで共用し、デフォルトブランチへ単一コミットを作る。
+ * moveは既存blobを再利用し同一パスは後勝ち。空リポジトリは初回扱いで参照を新規作成し、
+ * ref更新の409は楽観ロック競合としてconflictを返す。
  */
 
 import { githubApiFetch, githubUnreachable, mapGithubFailure } from '@/api/_lib/github-proxy';

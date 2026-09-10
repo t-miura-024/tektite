@@ -1,43 +1,8 @@
 /**
- * 一括コミット: POST /api/files/:owner/:repo/commit
- *
- * 複数ファイルの変更（作成/更新/削除/移動/複製）を 1 回の保存として適用する
- * （リネーム/移動に伴うリンク張り替えもこのエンドポイントで 1 コミットになる）。
- *
- * M4 の R2 先行化（完了条件 3）:
- * - 初期同期済み（R2 メタあり）の Vault は R2 へだけ反映し、GitHub API を
- *   消費しない。GitHub への push は同期時（M5 の定時/明示同期）のみで、
- *   push は既存の commit フロー（src/api/_lib/github-commit.ts の
- *   commitChangesToGitHub: Git Blobs → Trees → Commits → refs）を再利用する
- * - 未同期（R2 メタなし）の Vault は従来どおり GitHub へ直接コミットする
- *   （R2 が正になる前の Vault の書き込み経路）
- *
- * body: `{ changes: [{ op, path, to?, content? }], message }`
- * - op 'create' / 'update': path に content（base64）を置く
- * - op 'delete': path のファイルを削除する
- * - op 'move': path（from）を to へ移動する。本文は送らず、既存の本文を
- *   引き継ぐ（添付ファイルなどクライアントに本文を持たないファイルも移動できる）
- * - op 'copy': path（from）の内容を to へ複製する（元パスは削除しない）
- * - message: コミットメッセージ（必須）
- *
- * R2 への反映:
- * - `.md` で終わるパスはノート（`notes/{path}`）として書き、sha は
- *   コンテンツハッシュ（SHA-256）。それ以外は添付（`raw/{path}`）として
- *   バイナリ + 拡張子由来の Content-Type で書く
- * - move / copy は元パスの種別（notes / raw）に応じて本文・Content-Type を
- *   引き継ぐ。元が R2 に無い場合は 400 invalid_change で中断する
- * - ファイルツリー（`tree`）へも反映し、保存後の読み取り（R2 が正）と整合させる
- * - delete / move（移動元）はローカル削除の tombstone（`deleted/{path}`）を
- *   記録する。同期（M5）がプルで復活させず、プッシュで GitHub へ削除を反映する
- *
- * 応答:
- * - パラメータ不正                  → 400 { error: 'invalid_vault_ref' }
- * - ボディ不正                      → 400 { error: 'invalid_body' }
- * - 移動元/複製元が R2 にない       → 400 { error: 'invalid_change' }
- * - 未ログイン                      → 401 { error: 'unauthenticated' }
- * - レートリミット（403 / 429）     → 429 { error: 'rate_limited' }
- * - ブランチ競合（ref 更新 409）    → 409 { error: 'conflict' }
- * - 正常                            → 200 { owner, name, branch, commitSha }
+ * 一括コミット。複数変更（作成・更新・削除・移動・複製）を1保存で適用する。
+ * 同期済みVaultはR2にだけ反映してGitHub APIを消費せず、pushは同期時に束ねる。
+ * 未同期VaultはGitHubへ直接コミットする。本文検証とパス検証の不正は400で返す。
+ * R2反映時は種別に応じてノート・添付・ツリーへ書き分け、削除はtombstoneを残す。
  */
 
 import { createRoute } from 'honox/factory';

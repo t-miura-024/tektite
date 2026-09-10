@@ -1,16 +1,7 @@
 /**
- * セッション Cookie 用の AES-GCM 暗号化（ADR-0002）。
- *
- * GitHub のアクセストークンを Workers シークレット（SESSION_SECRET）由来の鍵で
- * 暗号化し、HttpOnly Cookie に格納するためのペイロードを生成/復号する。
- * サーバー側ストレージ（KV / D1）は使わず、暗号化 Cookie が唯一のセッション状態。
- *
- * ペイロード形式: `v1.<base64url(iv)>.<base64url(ciphertext)>`
- * - 鍵は SESSION_SECRET の SHA-256 ダイジェストから AES-GCM 256 鍵を導出
- * - iv は 12 バイトの乱数を暗号化ごとに生成
- *
- * WebCrypto（crypto.subtle）のみを使用し、Node API には依存しない
- * （Workers ランタイム・ブラウザ・Vitest(node) のいずれでも動作する）。
+ * セッションCookie用のAES-GCM暗号化（ADR-0002）。
+ * SESSION_SECRET由来の鍵でトークンを暗号化しHttpOnly Cookieに格納する。サーバー側ストレージは使わない。
+ * 形式はv1.<iv>.<ciphertext>で、鍵はSHA-256から導出、ivは12バイト乱数とする。WebCryptoのみを使いNode APIに依存しない。
  */
 
 import { base64UrlDecode, base64UrlEncode } from '@/domain/auth/base64url';

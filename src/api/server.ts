@@ -1,15 +1,8 @@
 /**
- * HonoX Worker エントリ。
- *
- * - ファイルベースルーティング: `createApp({ root: '/src/api' })` により
- *   `src/api/routes/**` が `/api/**` へマップされる（Pages Functions の
- *   `functions/api/**` と URL 互換）。
- * - SPA フォールバック: クライアントサイドルーティング（`/:owner/:repo` 等の
- *   パスベースディープリンク）のため、API 以外の 404 は index.html を返す。
- *   dev は Vite の HTML 変換（HMR / モジュール解決）、Workers は Static Assets
- *   （ASSETS バインディング）から配信する。
- * - scheduled: Cron（定時同期）のハンドラ。保持中の全 Vault を対象に
- *   プル + プッシュを実行する（M5。完了条件 4 / 10）。
+ * HonoXエントリ。routesを配し、API以外はSPAのindex.htmlへフォールバックする。
+ * devはViteのHTML変換、WorkersはStatic Assetsから配信する。APIの404はJSONで返す。
+ * 定時ハンドラは保持中の全Vaultを逐次で両方向同期し、失敗はmetaへ記録する。
+ * 衝突時は中断して次回Cronで再試行し、1Vaultの失敗が他へ波及しない。
  */
 
 import { createApp } from 'honox/server';
@@ -71,19 +64,7 @@ app.notFound(async (c) => {
   return c.json({ error: 'not_found' }, 404);
 });
 
-/**
- * 定時同期（Cron 1 時間おき。完了条件 4 / 10）。
- *
- * 保持中の全 Vault（R2 に同期済みメタがある Vault）を対象に、プル + プッシュの
- * 両方向を実行する。認証はユーザー Cookie を持てないため、KV に暗号化保存された
- * トークン（ADR-0007）を Vault の owner 単位で取得する（getServerAccessToken。
- * 期限切れ時は refresh_token で自動延長）。
- *
- * 失敗は Vault 単位で meta に記録され（recordSyncFailure）、次回同期で
- * 自動リトライされる。同期衝突（GitHub 側変更 + R2 側ローカル保存の重なり）は
- * ユーザー不在のためデータ保護を優先し、その Vault の同期を中断する（明示同期で
- * 解決するまで自動リトライされ続ける）。
- */
+/** 定時同期（1時間）。全Vaultを両方向同期し失敗は記録、衝突は中断する。 */
 export async function runScheduledSync(env: Env): Promise<void> {
   const bucket = env.VAULT_BUCKET;
   if (!bucket) {

@@ -1,14 +1,7 @@
 /**
- * Draft 系ユースケース（M3: 未保存編集バッファの localStorage 退避）。
- *
- * Draft は保存前の編集バッファをブラウザのローカルストレージに退避したもの
- * （CONTEXT.md 参照）。リロードや誤クローズ後、次回ノートを開いたときに復元
- * 通知するために使う。キーは実装（src/infra/storage）が `draft:<owner>/<repo>:<path>`
- * 形式で採番する。
- *
- * GitHub やサーバーには触れず、ポート（DraftStore）経由でだけ永続化に触れる。
- * ポートは Effect Service（Tag）として定義し、具体実装（Layer）は src/infra が、
- * 組成は src/composition が担う（src/application/note.ts と同じ仕組み）。
+ * Draft 系ユースケース（M3: 未保存編集の退避）。
+ * リロード後の復元通知に使う。GitHubに触れず DraftStore 経由で永続化する。
+ * 実装は src/infra、組成は src/composition が担う。
  */
 
 import { Context, Effect } from 'effect';

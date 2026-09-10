@@ -1,18 +1,8 @@
 /**
- * Vault 一覧: GET /api/vaults
- *
- * ログインユーザーのリポジトリを Vault 候補として一覧する。
- * トークンは暗号化 Cookie から復号（M2 の session 実装を再利用）。
- *
- * - Vault 候補のフィルタはドメインロジック（src/domain/vault の isVaultCandidate）:
- *   write（push）権限があり、アーカイブ済みでないリポジトリのみ。
- * - 個人利用の規模を前提に、直近更新順で最大 300 件（100 件 × 3 ページ）取得する。
- *
- * 応答:
- * - 未ログイン                     → 401 { error: 'unauthenticated' }
- * - GitHub 到達不能                → 502 { error: 'github_unreachable' }
- * - レートリミット（403 / 429）    → 429 { error: 'rate_limited' }
- * - 正常                           → 200 { vaults: [...] }
+ * Vault一覧。ログインユーザーのリポジトリを直近更新順に最大300件まで返す。
+ * write権限がありアーカイブ済みでない候補だけを残し、ページングは逐次取得する。
+ * 並列取得でレートリミットを圧迫しないよう、100件未満のページで早期終了する。
+ * トークンは暗号化CookieかPATから解決し、失敗はUI向けenvelopeに変換する。
  */
 
 import { createRoute } from 'honox/factory';

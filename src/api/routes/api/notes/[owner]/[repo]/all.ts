@@ -15,29 +15,7 @@ import {
   tryServeFromR2,
 } from '@/api/_lib/notes-all-helpers';
 
-/**
- * ノート一括取得: GET /api/notes/:owner/:repo/all
- *
- * 対象 Vault の全 Markdown ノート（本文 + sha）を 1 リクエストで返す。
- * クライアント側ノート索引（M4）の初期展開に使う。MVP はデフォルトブランチのみ
- * 対象（/api/tree と同じ前提）。
- *
- * 流れ: リポジトリ情報でデフォルトブランチを解決 → Git Trees API（recursive=1）
- * で全 blob の path と sha を取得 → Markdown blob だけを Git Blobs API で並列取得
- * （同時 8 件ずつのチャンク。個人 Vault 規模のノート数でもレートリミットに収まる）→
- * [{ path, sha, content }] に整形する。
- *
- * 個別 blob の取得失敗（404 等）は応答から除外する（索引が不完全になるだけで
- * 画面は継続する。個別取得と同じ寛容な扱い）。ツリーの truncated はフラグで
- * 通知し、クライアントが索引の網羅性を判断できるようにする。
- *
- * 応答:
- * - パラメータ不正                  → 400 { error: 'invalid_vault_ref' }
- * - 未ログイン                      → 401 { error: 'unauthenticated' }
- * - Vault（リポジトリ）が見つからない → 404 { error: 'not_found' }
- * - レートリミット（403 / 429）     → 429 { error: 'rate_limited' }
- * - 正常                            → 200 { owner, name, defaultBranch, truncated, notes }
- */
+/** ノート一括取得。全件返し索引初期化に使う。失敗は除外する。 */
 
 /** パスパラメータを文字列に正規化する（配列で渡された場合は先頭を採用） */
 function paramToString(value: string | string[] | undefined): string {

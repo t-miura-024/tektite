@@ -1,16 +1,8 @@
 /**
- * OAuth コールバック: GET /api/auth/callback
- *
- * 1. state の検証（署名付き Cookie との突き合わせ、CSRF 対策）
- * 2. authorization code をアクセストークンに交換（server-side のみ）
- * 3. トークンを AES-GCM 暗号化して HttpOnly Cookie に格納（ADR-0002）
- * 4. トークンペアを KV に暗号化保存（ADR-0007。write 権限を保存時に確認し、
- *    以降の Cron 同期では Cookie なしで GitHub アクセスできるようにする）
- * 5. ログイン前の return-to（署名付き Cookie、既定は SPA ルート）へリダイレクト
- *    （失敗時は ?error=<code> を付与して SPA ルートへ）
- *
- * KV 保存はベストエフォート: 失敗・KV 未設定・write 権限なしでも
- * ログイン（Cookie フロー）は継続し、既存挙動を壊さない。
+ * OAuthコールバック。state検証後にcodeをトークン交換し、暗号化Cookieを発行する。
+ * トークンペアはKVへ暗号化保存し、署名検証済みのreturn-to（既定はSPAルート）へ遷移する。
+ * KV保存はベストエフォートで、失敗や権限不足でもログイン自体は継続する。
+ * 失敗時はerror付きでSPAルートへ戻し、state等のCookieを破棄する。
  */
 
 import { createRoute } from 'honox/factory';

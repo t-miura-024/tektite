@@ -14,24 +14,7 @@ import {
   tryServeTreeFromR2,
 } from '@/api/_lib/tree-helpers';
 
-/**
- * ファイルツリー: GET /api/tree/:owner/:repo
- *
- * 対象 Vault のデフォルトブランチのファイルツリーを返す（MVP はデフォルト
- * ブランチのみ対象）。まずリポジトリ情報でデフォルトブランチを解決し、
- * Git Trees API（recursive=1）で 1 回にまとめて取得する。
- *
- * 応答:
- * - パラメータ不正                 → 400 { error: 'invalid_vault_ref' }
- * - 未ログイン                     → 401 { error: 'unauthenticated' }
- * - Vault（リポジトリ）が見つからない → 404 { error: 'not_found' }
- * - レートリミット（403 / 429）    → 429 { error: 'rate_limited' }
- * - 正常                           → 200 { owner, name, defaultBranch, truncated, entries }
- *
- * entries は [{ path, type: 'file' | 'directory' }] のフラット列。
- * 隠れディレクトリの除外・ツリー構築はクライアントのドメイン層（src/domain/tree）
- * が担当する。サブモジュール（type: 'commit'）は対象外のため含めない。
- */
+/** ファイルツリー取得。既定ブランチを一括取得する。整形はドメイン層。 */
 
 /** パスパラメータを文字列に正規化する（配列で渡された場合は先頭を採用） */
 function paramToString(value: string | string[] | undefined): string {

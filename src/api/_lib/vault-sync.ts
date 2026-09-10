@@ -1,16 +1,8 @@
 /**
- * Vault 同期（M5: 定時 + 明示同期の共通ロジック）。
- *
- * プル (GitHub → R2) とプッシュ (R2 → GitHub) を 1 回の処理で行う。
- * 定時同期（scheduled ハンドラ）と明示同期（POST /sync）の両方から呼ばれる。
- * プルは vault-sync-pull、プッシュは vault-sync-push、GitHub 読み取りは
- * vault-sync-github、衝突解決は vault-sync-resolve が担い、このモジュールは
- * 全体の進行と完了処理を担う:
- * - 成功: ツリーキャッシュと meta を更新し、lastSyncError / tombstone /
- *   dirty マーカーをクリアする（反映済みのため復活しない）
- * - 衝突あり（明示同期）: 非衝突分を反映・プッシュし conflicts を返す。
- *   meta / ツリーキャッシュは更新しない（解決後の同期で整合させる）
- * - 衝突あり（定時同期）: sync_conflict で中断する（次回同期で自動リトライ）
+ * Vault同期の共通処理。GitHub→R2のプルとR2→GitHubのプッシュを1回で実行する。
+ * 定時・明示の双方から呼ばれ、未処理差分が残る場合はsyncingとして継続する。
+ * プッシュはdirtyとtombstoneを1コミットに束ね、成功時はマーカーを消してmetaを更新する。
+ * 明示同期は衝突をconflictsで返し、定時同期は中断する。失敗はmetaへ記録する。
  */
 
 import { listAllR2Keys } from '@/api/_lib/r2-list';

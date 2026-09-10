@@ -1,16 +1,7 @@
 /**
- * Markdown の行ベース構文解析（ライブプレビュー装飾の基礎）。
- *
- * 純 TypeScript・フレームワーク非依存の関数で、テキストを走査して
- * 装飾対象の範囲（from/to は UTF-16 コード単位のオフセット）と種別の
- * リストを返す。CodeMirror 6 の Decoration への変換は infra 層の責務
- * （src/infra/editor/markdown-decoration.ts）が担う。
- *
- * 意図的に「過剰に完全」にはしない: ネストした強調・行をまたぐインライン
- * 要素・複雑な URL（タイトル付き等）は装飾対象外。Obsidian 記法
- * （WikiLink / Embed / Tag / Frontmatter）は src/domain/notation が担う。
- * 装飾は重ならず、出力は常に from 昇順になる
- * （CM6 の RangeSetBuilder が from 昇順を要求するため）。
+ * Markdownの行ベース構文解析。
+ * テキストを走査し装飾範囲（UTF-16オフセット）と種別を返す純関数。見出し・コード・リスト・引用・水平線を行単位で判定し、本文はインライン解析する。
+ * CM6変換はinfra層が担い、Obsidian記法はnotationが担う。出力は常に重ならずfrom昇順になる。
  */
 
 import { parseInline } from '@/domain/markdown/inline';

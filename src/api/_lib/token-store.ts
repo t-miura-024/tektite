@@ -1,18 +1,8 @@
 /**
- * サーバー側トークンストア（KV、ADR-0007）。
- *
- * Cron 同期（M5）はユーザー Cookie を持てないため、GitHub OAuth の
- * アクセストークン + リフレッシュトークンを KV に AES-GCM 暗号化して保存し、
- * 期限切れ時はリフレッシュトークンで自動延長する（ADR-0007）。
- * 暗号化は session-crypto（ADR-0002 の AES-GCM 方式）を再利用する。
- *
- * - 保存: ログイン callback 時。write 権限（scope に repo）と /user での
- *   ログイン名解決を保存時に確認し、以降の同期では確認しない
- * - 読み出し: アクセストークンが期限切れなら refresh して保存し直す。
- *   GitHub は refresh のたびに新しい access_token / refresh_token を返す
- *   （refresh token はローテーションされる）
- * - KV 未設定（TOKEN_KV バインディングなし）でもビルド・実行は通り、
- *   その環境ではサーバー側トークン保持が無効になる（Cookie フローは従来通り）
+ * サーバー側トークンストア（KV）。Cron用にトークンペアをAES-GCM暗号化して保存する。
+ * 保存はcallback時にwrite権限とログイン名の確認を伴い、期限切れは自動延長する。
+ * 延長時はローテーションされた新ペアを保存し直し、未保存や復号失敗はnullで返す。
+ * KV未設定でも実行は通り保持だけが無効になり、Cookieフローは従来通り動く。
  */
 
 import { isErrorNamed, makeNamedError } from '@/api/_lib/error-object';
@@ -223,17 +213,7 @@ export async function getServerAccessToken(
   return { ok: true, accessToken: refreshed.accessToken };
 }
 
-/**
- * ログイン callback 時にトークンペアを KV へ暗号化保存する。
- *
- * 保存条件（方針 6: write 権限は保存時に確認し、以降は確認しない）:
- * 1. KV バインディングが設定されている
- * 2. トークンに write 権限がある（OAuth scope に repo が含まれる）
- * 3. /user でログイン名が解決できる（KV キーが login 単位のため）
- *
- * いずれかを満たさない場合は保存せず false を返す（ログイン自体は
- * Cookie フローで継続し、既存挙動を壊さない）。
- */
+/** callback時にKVへ保存する。条件外は保存せず継続する。 */
 export async function persistOAuthTokenPair(
   env: Env,
   config: AuthConfig,

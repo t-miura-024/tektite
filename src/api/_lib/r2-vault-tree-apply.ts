@@ -13,18 +13,7 @@ export type VaultTreeChange = {
   readonly path: string;
 };
 
-/**
- * ツリーキャッシュへファイル操作の結果を反映する（M4: 一括コミットの R2 先行化）。
- *
- * - ファイルエントリは add / remove を適用する（既存のファイルは保持する。
- *   遅延キャッシュ前の GitHub 由来エントリを失わないため）
- * - ディレクトリエントリはファイルパスの祖先から再構成する（移動・削除後の
- *   空ディレクトリがツリーに残らないようにする）
- * - ツリーが未キャッシュ（初期同期前）の Vault は何もしない
- * - ローカルで追加されたファイル（sha 未指定）は sha: null で追加し、
- *   既にエントリがあるパスは既存の sha を保持する（M5 の同期が「ローカル
- *   追加 vs GitHub 由来」を区別する材料にする）
- */
+/** ファイル操作結果をツリーキャッシュへ反映する。未取得は何もしない。 */
 export async function applyVaultTreeChanges(
   bucket: R2Bucket,
   owner: string,

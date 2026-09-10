@@ -1,15 +1,7 @@
 /**
- * ノート系ユースケース（M1: ノート読み込みと CM6 エディタ基盤 / M3: 保存）。
- *
- * ノート（Markdown ファイル）の本文と sha を取得し、保存する。sha は保存時の
- * 楽観ロック（M3）に使うため、本文と常にセットで返す。保存時のコミット
- * メッセージは自動生成（`Update <ファイル名>` / `Create <ファイル名>`）で、
- * ユーザー入力は求めない（方針: 自動生成テンプレート）。
- * GitHub API には直接触れず、ポート（NoteGateway）経由でだけ通信する。
- * 実装は src/infra/github（Pages Functions プロキシ呼び出し）。
- *
- * ポートは Effect Service（Tag）として定義し、具体実装（Layer）は src/infra が、
- * 組成は src/composition が担う（src/application/session.ts と同じ仕組み）。
+ * ノート系ユースケース（M1: 読込 / M3: 保存）。
+ * 本文とshaをセットで扱い、shaで楽観ロックする。保存メッセージは自動生成し、通信はNoteGateway経由のみで行う。
+ * 実装はinfra層、Effectの組成はcomposition層が担う。新規作成時はbaseShaにnullを渡し、一括取得や一括コミットの型も定義する。
  */
 
 import { Context, Effect } from 'effect';
@@ -117,17 +109,7 @@ export type NoteSaveRequest = {
 };
 
 /**
- * 一括コミットの変更 1 件（M5: ファイル操作）。
- *
- * - create / update: path に本文（UTF-8）を置く。base64 化は infra 層が行う
- * - create-binary: 画像などバイナリを標準 base64（btoa 互換）のまま置く
- *   （UTF-8 テキスト経由にすると二重エンコードで壊れるため。M2 画像アップロード）
- * - delete: path のファイルを削除する（GitHub 上の実削除）
- * - move: from（path）を to へ移動する。本文は転送せず、サーバー側が base tree
- *   の blob sha を再利用する（添付ファイルなど本文をクライアントに持たない
- *   ファイルもディレクトリ移動で正しく動く。M5 方針 2 の一括コミット）
- * - copy: from（path）の内容を to へ複製する。本文は転送せず、サーバー側が
- *   base tree の blob sha を再利用して移動先に置く（move と違い元は残す）
+ * 一括コミットの変更1件（M5）。move/copyはサーバー側でblobを再利用する。
  */
 export type FileChange =
   | { readonly op: 'create'; readonly path: string; readonly content: string }
@@ -222,11 +204,7 @@ function noteFileName(notePath: string): string {
 }
 
 /**
- * ノートを保存する（コミットメッセージは自動生成）。
- * baseSha が null なら新規作成（`Create <ファイル名>`）、sha を持つなら更新
- * （`Update <ファイル名>`）として Contents API に渡す。リモートが読込時から
- * 変更されていた場合は NoteSaveError('conflict') で返り、UI は Conflict を
- * 識別できる（データ損失を防ぐ楽観ロック）。
+ * ノートを保存する（メッセージ自動生成。競合はconflictで返す）。
  */
 export const saveNoteContent = (
   ref: VaultRef,
